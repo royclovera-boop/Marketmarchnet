@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Catatan Trading</title>
+
+<script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+<script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+
+<style>
+body{font-family:Arial,sans-serif;background:#161b22;color:#fff;padding:20px;}
+.card{background:#1f262f;padding:15px;margin:10px 0;border-radius:10px;}
+input,button{padding:8px;margin:5px 0;border-radius:5px;border:none;}
+#chart{max-width:900px;margin:20px auto;}
+.rank-box{text-align:center;margin-top:20px;font-size:1.2em;}
+#notes{background:#111;padding:10px;border-radius:8px;max-height:250px;overflow-y:auto;}
+button:hover{opacity:0.8;cursor:pointer;}
+.note-item{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;padding:5px;border-radius:5px;background:#222;}
+.note-item button{background:red;color:white;padding:2px 6px;border-radius:4px;}
+.total-profit{font-size:1.5em;margin-bottom:10px;font-weight:bold;}
+
+.rank-display{
+margin-top:15px;
+padding:15px;
+border-radius:12px;
+display:flex;
+align-items:center;
+justify-content:center;
+gap:15px;
+transition:0.4s ease;
+}
+
+.rank-display img{
+width:100px;
+transition:0.4s ease;
+}
+
+.rank-text{
+font-weight:bold;
+letter-spacing:1px;
+transition:0.4s ease;
+}
+</style>
+</head>
+
+<body>
+
+<h1>Catatan Trading</h1>
+
+<div class="card">
+<h2>Profil User</h2>
+<p id="usernameDisplay">Memuat user...</p>
+</div>
+
+<div class="card">
+<h2>Input Profit/Loss</h2>
+<input type="text" id="periodLabel" placeholder="Contoh: Maret / 2026">
+<input type="number" id="plInput" placeholder="Masukkan angka $">
+<button id="addPLBtn">Tambah Data</button>
+</div>
+
+<div class="card">
+<div id="chart"></div>
+<div class="rank-box">
+<h3>Total P/L</h3>
+<div id="totalPL" class="total-profit">$0</div>
+
+<h3>Rank Trading</h3>
+<div id="rankResult"></div>
+</div>
+</div>
+
+<div class="card">
+<h2>Catatan</h2>
+<div id="notes"></div>
+</div>
+
+<div class="card" style="text-align:center;">
+<button id="screenshotBtn">Screenshot HD</button>
+</div>
+
+<script>
+const firebaseConfig = {
+  apiKey: "__FIREBASE_APIKEY__",
+  authDomain: "__FIREBASE_AUTHDOMAIN__",
+  projectId: "__FIREBASE_PROJECTID__"
+};
+
+// Inisialisasi Firebase
+if(!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+let chart;
+let uid="";
+let displayName="";
+
+function formatDollar(number){
+return new Intl.NumberFormat("en-US",{
+style:"currency",
+currency:"USD",
+minimumFractionDigits:0
+}).format(number);
+}
+
+auth.onAuthStateChanged(user=>{
+if(user){
+uid=user.uid;
+displayName=user.email ? user.email.split("@")[0] : "User";
+document.getElementById("usernameDisplay").innerText=`Halo, ${displayName}`;
+startRealtime();
+}else{
+document.getElementById("usernameDisplay").innerText="Silakan login dulu.";
+}
+});
+
+function startRealtime(){
+
+db.collection("tradingData")
+.where("uid","==",uid)
+.onSnapshot(snapshot=>{
+
+const notesDiv=document.getElementById("notes");
+notesDiv.innerHTML="";
+
+let chartData=[];
+let totalProfit=0;
+let docs=[];
+
+snapshot.forEach(doc=>{
+docs.push({id:doc.id,...doc.data()});
+});
+
+docs.sort((a,b)=>{
+if(!a.timestamp) return -1;
+if(!b.timestamp) return 1;
+return a.timestamp.seconds - b.timestamp.seconds;
+});
+
+docs.forEach((d)=>{
+const pl=d.pl;
+const open=totalProfit;
+const close=totalProfit+pl;
+const high=Math.max(open,close);
+const low=Math.min(open,close);
+
+chartData.push({
+x:d.label,
+y:[open,high,low,close]
+});
+
+totalProfit+=pl;
+});
+
+updateChart(chartData);
+updateRank(totalProfit);
+
+docs.slice().reverse().forEach((d,index)=>{
+const pl=d.pl;
+const color=pl>=0?"#00ff88":"#ff4d4d";
+
+const item=document.createElement("div");
+item.className="note-item";
+
+item.innerHTML=`
+<span>
+<b>#${index+1}</b> ${d.label} :
+<strong style="color:${color}">
+${formatDollar(pl)}
+</strong>
+${index===0 ? '<span style="color:yellow;margin-left:6px;">(Terbaru)</span>' : ''}
+</span>
+<button onclick="deleteData('${d.id}')">Hapus</button>
+`;
+
+notesDiv.appendChild(item);
+});
+
+});
+}
+
+document.getElementById("addPLBtn").addEventListener("click",()=>{
+if(!uid){alert("Login dulu");return;}
+
+const label=document.getElementById("periodLabel").value.trim();
+const pl=parseFloat(document.getElementById("plInput").value);
+
+if(!label||isNaN(pl)){alert("Isi dengan benar");return;}
+
+db.collection("tradingData").add({
+uid,
+label,
+pl,
+timestamp:firebase.firestore.FieldValue.serverTimestamp()
+});
+
+document.getElementById("periodLabel").value="";
+document.getElementById("plInput").value="";
+});
+
+function deleteData(id){
+db.collection("tradingData").doc(id).delete();
+}
+
+function updateChart(data){
+if(chart) chart.destroy();
+
+chart=new ApexCharts(document.querySelector("#chart"),{
+chart:{type:'candlestick',height:400,background:'#161b22'},
+series:[{data}],
+theme:{mode:'dark'},
+plotOptions:{
+candlestick:{
+colors:{upward:'#00ff88',downward:'#ff4d4d'}
+}
+},
+xaxis:{type:'category'}
+});
+
+chart.render();
+}
+
+// ================= FINAL RANK SYSTEM (RAPI VERSION) =================
+function updateRank(totalProfit){
+
+let rankText="NEWBIE";
+let rankIMG="IMG/newbie.png";
+let textColor="#ffffff";
+let fontSize="20px";
+let glow="none";
+
+// ===== MINUS RANK =====
+if(totalProfit < -10000000){
+rankText="UNDERDOG";
+rankIMG="IMG/underdog.png";
+glow="0 0 25px red";
+fontSize="30px";
+}
+else if(totalProfit < -1000000){
+rankText="GAMBLER";
+rankIMG="IMG/gembler.png";
+glow="0 0 20px crimson";
+fontSize="28px";
+}
+else if(totalProfit < -100000){
+rankText="BOT";
+rankIMG="IMG/bot.png";
+glow="0 0 15px darkred";
+fontSize="26px";
+}
+else if(totalProfit < -10000){
+rankText="NOOB";
+rankIMG="IMG/noob.png";
+fontSize="24px";
+}
+else if(totalProfit < -1000){
+rankText="UNRANKED";
+rankIMG="IMG/unranked.png";
+fontSize="22px";
+}
+
+// ===== POSITIVE RANK =====
+else if(totalProfit >= 100000000){
+rankText="MYTHIC";
+rankIMG="IMG/mythic.png";
+textColor="gold";
+glow="0 0 30px gold";
+fontSize="34px";
+}
+else if(totalProfit >= 10000000){
+rankText="LEGEND";
+rankIMG="IMG/legend.png";
+glow="0 0 20px #ff512f";
+fontSize="30px";
+}
+else if(totalProfit >= 1000000){
+rankText="MASTER";
+rankIMG="IMG/master.png";
+glow="0 0 18px #00c6ff";
+fontSize="28px";
+}
+else if(totalProfit >= 100000){
+rankText="ELITE";
+rankIMG="IMG/elit.png";
+fontSize="26px";
+}
+else if(totalProfit >= 10000){
+rankText="PRO";
+rankIMG="IMG/pro.png";
+fontSize="24px";
+}
+else if(totalProfit >= 1000){
+rankText="ROOKIE";
+rankIMG="IMG/rookie.png";
+fontSize="22px";
+}
+
+const totalEl=document.getElementById("totalPL");
+totalEl.innerText=formatDollar(totalProfit);
+totalEl.style.color=totalProfit>=0?"#00ff88":"#ff4d4d";
+
+document.getElementById("rankResult").innerHTML=
+`
+<div style="
+margin-top:20px;
+display:flex;
+flex-direction:column;
+align-items:center;
+gap:12px;
+">
+<img src="${rankIMG}" style="width:110px;">
+<span style="
+font-weight:700;
+font-size:${fontSize};
+color:${textColor};
+text-shadow:${glow};
+letter-spacing:1.5px;
+">
+${rankText}
+</span>
+</div>
+`;
+}
+
+document.getElementById("screenshotBtn").addEventListener("click",()=>{
+html2canvas(document.body,{scale:3}).then(canvas=>{
+const link=document.createElement("a");
+link.download=`Catatan_${displayName}.png`;
+link.href=canvas.toDataURL();
+link.click();
+});
+});
+</script>
+
+</body>
+  </html>

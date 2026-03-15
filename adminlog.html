@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Log - Full Version</title>
+
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body { background:black; color:white; font-family:Arial; padding:20px; }
+h1 { color:#00ff88; text-align:center; margin-bottom:20px; }
+
+table { width:100%; border-collapse:collapse; margin-top:20px; }
+th, td { border:1px solid #444; padding:10px; text-align:center; }
+th { background:#111; }
+button { padding:5px 10px; border:none; border-radius:5px; cursor:pointer; font-weight:bold; }
+button.confirmed { background:gray; cursor:default; }
+button.delete { background:red; color:white; margin-left:5px; }
+button.confirm { background:limegreen; color:black; }
+button.loss { background:red; color:white; }
+.chartContainer { max-width:300px; margin:10px auto; }
+
+.chatBox { margin-top:40px; }
+#adminChatWindow { height:300px; overflow-y:auto; background:black; padding:10px; border-radius:10px; margin-top:10px; }
+.msgAdmin { background:#00ff88; color:black; padding:6px; margin:5px 0; border-radius:6px; }
+.msgUser { background:#222; color:white; padding:6px; margin:5px 0; border-radius:6px; }
+
+/* Popup P/L */
+#plPopup { display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+    background:#1f262f; padding:20px; border-radius:10px; border:2px solid #00ff88; z-index:9999; width:300px; }
+#plPopup input { width:100%; padding:8px; margin:5px 0; border-radius:5px; border:none; background:#111; color:white; }
+#plPopup button { width:48%; margin:2px 1%; }
+</style>
+</head>
+<body>
+
+<h1>Admin Log - Full Version</h1>
+
+<!-- ================= Pending Payments ================= -->
+<h2 style="color:#00ff88;">Pending Payments</h2>
+<table>
+<thead>
+<tr>
+<th>Email</th>
+<th>UID</th>
+<th>Jumlah</th>
+<th>Status</th>
+<th>Bukti</th>
+<th>Aksi</th>
+</tr>
+</thead>
+<tbody id="logBody"></tbody>
+</table>
+
+<!-- ================= Backtest Trades ================= -->
+<h2 style="color:#00ff88; margin-top:40px;">Pending Backtest Trades</h2>
+<table>
+<thead>
+<tr>
+<th>Email</th>
+<th>UID</th>
+<th>Pair</th>
+<th>Posisi</th> <!-- Perbaiki nama kolom dari "status" ke "Posisi" -->
+<th>Entry</th>
+<th>SL</th>
+<th>TP</th>
+<th>Waktu (London)</th>
+<th>Aksi</th>
+</tr>
+</thead>
+<tbody id="tradeBody"></tbody>
+</table>
+
+<!-- ================= Chat Realtime ================= -->
+<div class="chatBox">
+<h2 style="color:#00ff88;">Balas Chat User</h2>
+<table>
+<thead>
+<tr>
+<th>Email</th>
+<th>Aksi</th>
+</tr>
+</thead>
+<tbody id="chatList"></tbody>
+</table>
+
+<div id="chatArea" style="display:none;">
+    <h3 id="chatTitle"></h3>
+    <div id="adminChatWindow"></div>
+    <input type="text" id="adminMsg" placeholder="Tulis balasan..." 
+       style="width:70%;padding:8px; background:#111; color:white; border:1px solid #444; border-radius:5px;"> 
+    <button onclick="sendAdminMsg()" style="background:limegreen;color:black;">Kirim</button>
+    <button onclick="endAdminChat()" style="background:red;color:white;">Selesaikan Chat</button>
+      
+</div>
+</div>
+
+<!-- ================= Popup Input P/L ================= -->
+<div id="plPopup">
+<h3>Masukkan P/L</h3>
+<input type="number" id="plInput" placeholder="Contoh: 50 atau -13">
+<div style="text-align:center;">
+<button onclick="submitPL()" style="background:limegreen;color:black;">Simpan</button>
+<button onclick="cancelPL()" style="background:red;color:white;">Batal</button>
+</div>
+</div>
+
+<script>
+const firebaseConfig = {
+  apiKey: "__FIREBASE_APIKEY__",
+  authDomain: "__FIREBASE_AUTHDOMAIN__",
+  projectId: "__FIREBASE_PROJECTID__"
+};
+
+// Inisialisasi Firebase
+if(!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+
+// ==================== Admin Login ====================
+const logBody=document.getElementById("logBody");
+const tradeBody=document.getElementById("tradeBody");
+const chatList=document.getElementById("chatList");
+const adminChatWindow=document.getElementById("adminChatWindow");
+
+let currentChat=null;
+let unsubscribeChat=null;
+
+// Untuk P/L manual
+let currentPLTradeId=null;
+let currentPLIsWin=null;
+
+auth.onAuthStateChanged(async user=>{
+    if(!user){ window.location.href="login.html"; return; }
+    try {
+        const doc=await db.collection("users").doc(user.uid).get();
+        if(!doc.exists || !doc.data().Isadmin){
+            alert("Hanya admin yang bisa akses halaman ini!");
+            window.location.href="login.html";
+            return;
+        }
+        loadPendingPayments();
+        loadPendingTrades();
+        loadChatList();
+    } catch (error) {
+        console.error("Error saat memeriksa admin:", error);
+        alert("Gagal memverifikasi status admin, coba lagi nanti!");
+        window.location.href="login.html";
+    }
+});
+
+// ================= Pending Payments =================
+function loadPendingPayments(){
+    db.collection("pendingPayments").orderBy("timestamp","desc").onSnapshot(snapshot=>{
+        logBody.innerHTML="";
+        snapshot.forEach(doc=>{
+            const d=doc.data();
+            const tr=document.createElement("tr");
+            tr.innerHTML=`
+                <td>${d.email || '-'}</td>
+                <td>${d.uid || '-'}</td>
+                <td>${d.amount ? d.amount.toLocaleString('id-ID') : '-'}</td>
+                <td>${d.status || 'pending'}</td>
+                <td>${d.bukti ? `<a href="${d.bukti}" target="_blank">Lihat Bukti</a>` : '-'}</td>
+                <td>
+                    ${d.status==="pending" ? `<button class="confirm" onclick="confirmPayment('${doc.id}')">Konfirmasi</button>` 
+                    : `<button class="confirmed" disabled>✓ Sudah Dikonfirmasi</button>`}
+                    <button class="delete" onclick="deletePayment('${doc.id}')">Hapus</button>
+                </td>
+            `;
+            logBody.appendChild(tr);
+        });
+    }, error => {
+        console.error("Error memuat pending payments:", error);
+        alert("Gagal memuat data pembayaran!");
+    });
+}
+
+// Fungsi konfirmasi pembayaran yang diperbaiki
+async function confirmPayment(docId){
+    const btn = event.target;
+    btn.disabled = true;
+    btn.textContent = "Memproses...";
+
+    try {
+        const paymentDoc = await db.collection("pendingPayments").doc(docId).get();
+        if(!paymentDoc.exists){
+            throw new Error("Data pembayaran tidak ditemukan!");
+        }
+        const paymentData = paymentDoc.data();
+        const { uid, amount, email } = paymentData;
+
+        // Validasi data yang dibutuhkan
+        if(!uid || !amount || amount <= 0){
+            throw new Error("Data pembayaran tidak valid!");
+        }
+
+        // Aturan durasi perpanjangan (sesuaikan sesuai kebutuhan)
+        let durasiHari = 0;
+        if(amount === 2500) durasiHari = 30; // 1 bulan
+        else if(amount === 7500) durasiHari = 90; // 3 bulan
+        else if(amount === 15000) durasiHari = 180; // 6 bulan
+        else if(amount >= 30000) durasiHari = 365; // 1 tahun
+        else {
+            throw new Error(`Jumlah ${amount.toLocaleString('id-ID')} tidak sesuai paket apapun!`);
+        }
+
+        // Ambil data pengguna
+        const userDoc = await db.collection("users").doc(uid).get();
+        if(!userDoc.exists){
+            throw new Error(`Pengguna dengan email ${email} tidak ditemukan!`);
+        }
+
+        // Hitung tanggal expired baru
+        const tanggalSekarang = new Date();
+        let tanggalExpiredBaru;
+
+        if(userDoc.data().expiredDate){
+            const tanggalExpiredLama = new Date(userDoc.data().expiredDate);
+            if(tanggalExpiredLama < tanggalSekarang){
+                tanggalExpiredBaru = new Date(tanggalSekarang.setDate(tanggalSekarang.getDate() + durasiHari));
+                alert("Perhatian: Akun sudah kadaluwarsa, expired date dihitung dari hari ini!");
+            } else {
+                tanggalExpiredBaru = new Date(tanggalExpiredLama.setDate(tanggalExpiredLama.getDate() + durasiHari));
+            }
+        } else {
+            tanggalExpiredBaru = new Date(tanggalSekarang.setDate(tanggalSekarang.getDate() + durasiHari));
+        }
+
+        // Update data pengguna
+        await db.collection("users").doc(uid).update({
+            expiredDate: tanggalExpiredBaru.toISOString(),
+            isPremium: true,
+            lastPaymentDate: new Date().toISOString()
+        });
+
+        // Hapus data pembayaran yang sudah diproses
+        await db.collection("pendingPayments").doc(docId).delete();
+
+        alert(`✅ Pembayaran berhasil dikonfirmasi!
+- Pengguna: ${email}
+- Durasi: ${durasiHari} hari
+- Expired Baru: ${tanggalExpiredBaru.toLocaleDateString('id-ID', {
+    day: 'numeric', month: 'long', year: 'numeric'
+})}`);
+    } catch (error) {
+        console.error("Error konfirmasi pembayaran:", error);
+        alert(`❌ Gagal mengkonfirmasi: ${error.message}`);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "Konfirmasi";
+    }
+}
+
+function deletePayment(docId){ 
+    if(confirm("⚠️ Yakin ingin menghapus data pembayaran ini?")) {
+        db.collection("pendingPayments").doc(docId).delete()
+        .then(() => alert("✅ Data berhasil dihapus!"))
+        .catch(err => {
+            console.error("Error menghapus pembayaran:", err);
+            alert("❌ Gagal menghapus data!");
+        });
+    }
+}
+
+// ================= Backtest Trades =================
+function loadPendingTrades(){
+    db.collection("tempUserTrades").orderBy("timestamp","desc").onSnapshot(snapshot=>{
+        tradeBody.innerHTML="";
+        snapshot.forEach(doc=>{
+            const d=doc.data();
+            const timeLondon = new Date(d.timestamp).toLocaleString("en-GB",{timeZone:"Europe/London", hour12:false});
+            const tr=document.createElement("tr");
+            tr.innerHTML=`
+                <td>${d.email || '-'}</td>
+                <td>${d.uid || '-'}</td>
+                <td>${d.pair || '-'}</td>
+                <td>${d.position ? d.position.toUpperCase() : "-"}</td>
+                <td>${d.entry || '-'}</td>
+                <td>${d.sl || '-'}</td>
+                <td>${d.tp || '-'}</td>
+                <td>${timeLondon || '-'}</td>
+                <td>
+                    <button class="confirm" onclick="promptPL('${doc.id}',true)">TP</button>
+                    <button class="loss" onclick="promptPL('${doc.id}',false)">SL</button>
+                    <button class="delete" onclick="deleteTrade('${doc.id}')">Hapus</button>
+                </td>
+            `;
+            tradeBody.appendChild(tr);
+        });
+    }, error => {
+        console.error("Error memuat pending trades:", error);
+        alert("Gagal memuat data trade!");
+    });
+}
+
+function promptPL(docId,isWin){
+    currentPLTradeId=docId;
+    currentPLIsWin=isWin;
+    document.getElementById("plInput").value="";
+    document.getElementById("plPopup").style.display="block";
+}
+
+function cancelPL(){
+    currentPLTradeId=null;
+    currentPLIsWin=null;
+    document.getElementById("plPopup").style.display="none";
+}
+
+async function submitPL(){
+    const plValue=parseFloat(document.getElementById("plInput").value);
+    if(isNaN(plValue)){
+        alert("Isi P/L dengan angka yang valid!");
+        return;
+    }
+    if(!currentPLTradeId) return;
+
+    try {
+        const doc=await db.collection("tempUserTrades").doc(currentPLTradeId).get();
+        if(!doc.exists){
+            throw new Error("Data trade tidak ditemukan!");
+        }
+        const data=doc.data();
+
+        await db.collection("pendingTrades").add({
+            ...data,
+            pl: plValue,
+            status: currentPLIsWin ? "win" : "loss",
+            confirmed:true,
+            permanent:true
+        });
+
+        await db.collection("tempUserTrades").doc(currentPLTradeId).delete();
+        alert("✅ P/L berhasil disimpan!");
+        cancelPL();
+    } catch (error) {
+        console.error("Error menyimpan P/L:", error);
+        alert(`❌ Gagal menyimpan P/L: ${error.message}`);
+    }
+}
+
+function deleteTrade(docId){ 
+    if(confirm("⚠️ Yakin ingin menghapus trade ini?")) {
+        db.collection("tempUserTrades").doc(docId).delete()
+        .then(() => alert("✅ Trade berhasil dihapus!"))
+        .catch(err => {
+            console.error("Error menghapus trade:", err);
+            alert("❌ Gagal menghapus trade!");
+        });
+    }
+}
+
+// ================= Chat Realtime =================
+function loadChatList(){
+    db.collection("tempChat").where("active","==",true).onSnapshot(snapshot=>{
+        chatList.innerHTML="";
+        snapshot.forEach(doc=>{
+            const tr=document.createElement("tr");
+            tr.innerHTML=`<td>${doc.id || '-'}</td><td><button onclick="openChat('${doc.id}')" style="background:limegreen;">Buka</button></td>`;
+            chatList.appendChild(tr);
+        });
+    }, error => {
+        console.error("Error memuat daftar chat:", error);
+        alert("Gagal memuat daftar chat!");
+    });
+}
+
+function openChat(email){
+    currentChat=email;
+    document.getElementById("chatArea").style.display="block";
+    document.getElementById("chatTitle").innerText="Chat dengan: "+email;
+
+    if(unsubscribeChat) unsubscribeChat();
+
+    unsubscribeChat=db.collection("tempChat").doc(email).collection("messages").orderBy("timestamp")
+    .onSnapshot(snapshot=>{
+        adminChatWindow.innerHTML="";
+        snapshot.forEach(doc=>{
+            const data=doc.data();
+            const div=document.createElement("div");
+            div.className=data.sender==="admin"?"msgAdmin":"msgUser";
+
+            const timeLondon = new Date(data.timestamp).toLocaleString("en-GB",{timeZone:"Europe/London", hour12:false});
+            div.textContent=`[${timeLondon}] ${data.message || '-'}`;
+            adminChatWindow.appendChild(div);
+        });
+        adminChatWindow.scrollTop=adminChatWindow.scrollHeight;
+    }, error => {
+        console.error("Error memuat chat:", error);
+        alert("Gagal memuat pesan chat!");
+    });
+}
+
+function sendAdminMsg(){
+    const input=document.getElementById("adminMsg");
+    const msg=input.value.trim();
+    if(!msg || !currentChat) return;
+
+    db.collection("tempChat").doc(currentChat).collection("messages").add({
+        sender:"admin",
+        message:msg,
+        timestamp:Date.now()
+    })
+    .then(() => input.value="")
+    .catch(error => {
+        console.error("Error mengirim pesan:", error);
+        alert("❌ Gagal mengirim pesan!");
+    });
+}
+
+async function endAdminChat(){
+    if(!currentChat) return;
+    if(confirm("⚠️ Selesaikan dan hapus chat ini?")){
+        try {
+            // Hapus semua pesan dalam chat
+            const messagesSnapshot = await db.collection("tempChat").doc(currentChat).collection("messages").get();
+            const deletePromises = [];
+            messagesSnapshot.forEach(doc => deletePromises.push(doc.ref.delete()));
+            await Promise.all(deletePromises);
+
+            // Hapus dokumen chat utama
+            await db.collection("tempChat").doc(currentChat).delete();
+
+            // Bersihkan sesi chat
+            if(unsubscribeChat) unsubscribeChat();
+            document.getElementById("chatArea").style.display="none";
+            currentChat=null;
+            alert("✅ Chat berhasil diselesaikan dan dihapus!");
+        } catch (error) {
+            console.error("Error menyelesaikan chat:", error);
+            alert("❌ Gagal menyelesaikan chat!");
+        }
+    }
+}
+</script>
+</body>
+</html>

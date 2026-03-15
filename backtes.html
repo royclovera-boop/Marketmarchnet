@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Backtest Trading Engine</title>
+
+<script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+
+<style>
+body{font-family:Arial,sans-serif;background:#161b22;color:#fff;padding:20px;}
+.card{background:#1f262f;padding:15px;margin:10px 0;border-radius:10px;}
+label{display:block;margin-top:10px;margin-bottom:5px;}
+input, button, select{width:100%; padding:8px; margin:5px 0; border-radius:5px; border:none;}
+input{background:#111;color:white;}
+button{color:black; font-weight:bold; cursor:pointer; border-radius:5px;}
+button:hover{opacity:0.9;}
+.btn-buy{background:limegreen;}
+.btn-sell{background:#ff4d4d;}
+.btn-group{display:flex;gap:10px;}
+.btn-group button{width:50%;}
+.rank-display{margin-top:15px;padding:15px;border-radius:12px;}
+#status{margin-top:10px;color:#ff5555;}
+#notes{margin-top:10px;max-height:300px;overflow-y:auto;padding-right:5px;}
+#notes::-webkit-scrollbar{width:6px;}
+#notes::-webkit-scrollbar-thumb{background:#444;border-radius:10px;}
+.trade-approved{border-left:4px solid #00ff88;padding-left:8px;margin-bottom:8px;}
+.trade-pending{border-left:4px solid orange;padding-left:8px;margin-bottom:8px;}
+</style>
+</head>
+
+<body>
+
+<h1>Backtest Trading Engine</h1>
+
+<div class="card">
+<h2>Profil User</h2>
+<p id="usernameDisplay">Memuat user...</p>
+<div class="rank-display" id="rankDisplay"></div>
+</div>
+
+<div class="card">
+<h2>Input Trading</h2>
+
+<label>Pair</label>
+<input type="text" id="pairInput" placeholder="XAUUSD">
+
+<label>Entry</label>
+<input type="number" id="entryInput">
+
+<label>SL</label>
+<input type="number" id="slInput">
+
+<label>TP</label>
+<input type="number" id="tpInput">
+
+<label>Jam WIB</label>
+<input type="text" id="timeInput" readonly>
+
+<label>Jam London</label>
+<input type="text" id="londonTime" readonly>
+
+<label>posisi</label>
+<div class="btn-group">
+  <button id="buyBtn" class="btn-buy">BUY</button>
+  <button id="sellBtn" class="btn-sell">SELL</button>
+</div>
+<div id="status"></div>
+</div>
+
+<div class="card">
+<h2>Catatan Trading</h2>
+<div id="notes"></div>
+</div>
+
+<div class="card">
+<h2>Grafik P/L Total <span id="timeframeTitle">[H1]</span></h2>
+<select id="timeframeSelect">
+  <option value="D1">D1</option>
+  <option value="W1">W1</option>
+  <option value="M1">M1</option>
+  <option value="Y1">Y1</option>
+</select>
+<div id="chart"></div>
+</div>
+
+<script>
+const firebaseConfig = {
+  apiKey: "__FIREBASE_APIKEY__",
+  authDomain: "__FIREBASE_AUTHDOMAIN__",
+  projectId: "__FIREBASE_PROJECTID__"
+};
+
+// Inisialisasi Firebase
+if(!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+const auth=firebase.auth();
+const db=firebase.firestore();
+
+let uid="", displayName="", chart;
+const statusEl=document.getElementById("status");
+const notesDiv=document.getElementById("notes");
+const timeframeSelect=document.getElementById("timeframeSelect");
+const timeframeTitle=document.getElementById("timeframeTitle");
+let tradeType="";
+
+function updateTime(){
+  const now=new Date();
+  document.getElementById("timeInput").value=
+    now.toLocaleTimeString("id-ID",{hour:'2-digit',minute:'2-digit'});
+  const london=new Date(now.getTime()-7*60*60*1000);
+  document.getElementById("londonTime").value=
+    london.toLocaleTimeString("en-GB",{hour:'2-digit',minute:'2-digit'});
+}
+setInterval(updateTime,1000);
+updateTime();
+
+auth.onAuthStateChanged(user=>{
+  if(user){
+    uid=user.uid;
+    displayName=user.email.split("@")[0];
+    document.getElementById("usernameDisplay").innerText="Halo, "+displayName;
+    startRealtime();
+  }else{
+    document.getElementById("usernameDisplay").innerText="Silakan login dulu.";
+  }
+});
+
+document.getElementById("buyBtn").addEventListener("click", async ()=>{
+  tradeType="BUY";
+  submitTrade();
+});
+
+document.getElementById("sellBtn").addEventListener("click", async ()=>{
+  tradeType="SELL";
+  submitTrade();
+});
+
+async function submitTrade(){
+  if(!uid){
+    statusEl.innerText="Silakan login terlebih dahulu!";
+    return;
+  }
+  if(!tradeType){
+    statusEl.innerText="Pilih tipe trade (Buy/Sell) terlebih dahulu!";
+    return;
+  }
+  const pair=document.getElementById("pairInput").value.toUpperCase();
+  const entry=parseFloat(document.getElementById("entryInput").value);
+  const sl=parseFloat(document.getElementById("slInput").value);
+  const tp=parseFloat(document.getElementById("tpInput").value);
+  const wib=document.getElementById("timeInput").value;
+  const london=document.getElementById("londonTime").value;
+  const timestamp=Date.now();
+  const selectedTimeframe=timeframeSelect.value;
+
+  if(!pair||isNaN(entry)||isNaN(sl)||isNaN(tp)){
+    statusEl.innerText="Isi semua field dengan benar!";
+    return;
+  }
+
+  const tempCheck=await db.collection("tempUserTrades")
+    .where("uid","==",uid)
+    .where("pair","==",pair)
+    .get();
+  if(!tempCheck.empty){
+    statusEl.innerText="Pair ini masih dalam status pending!";
+    return;
+  }
+
+  await db.collection("tempUserTrades").add({
+    uid,
+    email:displayName,
+    pair,
+    tradeType,
+    entry,
+    sl,
+    tp,
+    wib,
+    london,
+    timestamp,
+    timeframe:selectedTimeframe
+  });
+
+  statusEl.style.color="#00ff88";
+  statusEl.innerText=`Trade ${tradeType} untuk ${pair} berhasil dibuat!`;
+}
+
+function startRealtime(){
+  timeframeSelect.addEventListener("change", ()=>{
+    const selectedTimeframe=timeframeSelect.value;
+    timeframeTitle.innerText=`[${selectedTimeframe}]`;
+    loadTradesByTimeframe(selectedTimeframe);
+  });
+  loadTradesByTimeframe(timeframeSelect.value);
+}
+
+async function loadTradesByTimeframe(selectedTimeframe){
+  notesDiv.innerHTML="";
+  let totalPL=0;
+  let cumulativePL=[];
+  let trades=[];
+
+  const snapshot=await db.collection("pendingTrades")
+    .where("uid","==",uid)
+    .where("confirmed","==",true)
+    .where("timeframe","==",selectedTimeframe)
+    .get();
+
+  snapshot.forEach(doc=>{
+    trades.push(doc.data());
+  });
+
+  trades.sort((a,b)=>(a.timestamp||0)-(b.timestamp||0));
+
+  trades.forEach((d,index)=>{
+    const pl=Number(d.pl)||0;
+    const color=pl>=0?"#00ff88":"#ff4d4d";
+    const typeColor=d.tradeType=="BUY"?"limegreen":"#ff4d4d";
+
+    const div=document.createElement("div");
+    div.className="trade-approved";
+    div.innerHTML=`
+      <b>#${index+1} ${d.tradeType} ${d.pair}</b>
+      <br>Entry: ${d.entry}
+      <br>SL: ${d.sl} | TP: ${d.tp}
+      <br>P/L: <span style="color:${color}">${pl}</span>
+      <br>WIB: ${d.wib} | London: ${d.london}
+      <br>Timeframe: ${d.timeframe}
+    `;
+    div.style.borderLeftColor=typeColor;
+    notesDiv.appendChild(div);
+
+    totalPL+=pl;
+    cumulativePL.push(totalPL);
+  });
+
+  updateChart(cumulativePL);
+  updateRank(totalPL);
+}
+
+function updateChart(cumulativePL){
+  if(chart) chart.destroy();
+
+  // Siapkan data candlestick berdasarkan total P/L kumulatif
+  let chartData=[];
+  cumulativePL.forEach((total, index)=>{
+    // Nilai candlestick berdasarkan P/L kumulatif
+    const prevTotal=index>0?cumulativePL[index-1]:0;
+    const open=prevTotal;
+    const close=total;
+    const high=Math.max(open, close);
+    const low=Math.min(open, close);
+    const isProfit=close>=open;
+
+    chartData.push({
+      x: `#${index+1}`, // Jumlah candle sesuai jumlah transaksi
+      y: [open, high, low, close],
+      isProfit: isProfit
+    });
+  });
+
+  chart=new ApexCharts(document.querySelector("#chart"),{
+    chart:{
+      type:'candlestick',
+      height:350,
+      background:'#161b22',
+      toolbar:{
+        show:true,
+        tools:{
+          download:true,
+          zoom:true,
+          selection:true
+        }
+      }
+    },
+    series:[{
+      name:'Total P/L',
+      data:chartData
+    }],
+    theme:{mode:'dark'},
+    xaxis:{
+      type:'category',
+      labels:{
+        style:{colors:'#fff'},
+        title:{text:'Nomor Transaksi', style:{color:'#fff'}}
+      }
+    },
+    yaxis:{
+      title:{text:'Total P/L', style:{color:'#fff'}},
+      labels:{style:{colors:'#fff'}}
+    },
+    tooltip:{
+      theme:'dark',
+      custom:function({series, seriesIndex, dataPointIndex, w}){
+        const data=w.globals.series[seriesIndex][dataPointIndex];
+        const plColor=data.isProfit?'#00ff88':'#ff4d4d';
+        const status=data.isProfit?'Profit':'Loss';
+        
+        return `
+          <div style="padding:5px;">
+            <b>Transaksi ${data.x}</b><br>
+            Open (Total P/L Sebelumnya): ${data.y[0]}<br>
+            High: ${data.y[1]}<br>
+            Low: ${data.y[2]}<br>
+            Close (Total P/L Sekarang): ${data.y[3]}<br>
+            Status: <span style="color:${plColor}">${status}</span>
+          </div>
+        `;
+      }
+    },
+    grid:{borderColor:'#333'},
+    plotOptions:{
+      candlestick:{
+        colors:{
+          upward:'#00ff88',
+          downward:'#ff4d4d'
+        },
+        wick:{useFillColor:true}
+      }
+    }
+  });
+  chart.render();
+}
+
+function updateRank(totalProfit){
+let rankText="Newbie",rankIMG="IMG/newbie.png";
+
+if(totalProfit>=100000000){rankText="Mythic";rankIMG="IMG/mythic.png";}
+else if(totalProfit>=10000000){rankText="Legend";rankIMG="IMG/legend.png";}
+else if(totalProfit>=1000000){rankText="Master";rankIMG="IMG/master.png";}
+else if(totalProfit>=100000){rankText="Elit";rankIMG="IMG/elit.png";}
+else if(totalProfit>=10000){rankText="Pro";rankIMG="IMG/pro.png";}
+else if(totalProfit>=1000){rankText="Rookie";rankIMG="IMG/rookie.png";}
+else if(totalProfit<-10000000){rankText="Underdog";rankIMG="IMG/underdog.png";}
+else if(totalProfit<-1000000){rankText="Gembler";rankIMG="IMG/gembler.png";}
+else if(totalProfit<-100000){rankText="Bot";rankIMG="IMG/bot.png";}
+else if(totalProfit<-10000){rankText="Noob";rankIMG="IMG/noob.png";}
+else if(totalProfit<-1000){rankText="Unranked";rankIMG="IMG/unranked.png";}
+
+document.getElementById("rankDisplay").innerHTML=
+`
+<div style="text-align:center;">
+  <img src="${rankIMG}" width="100"><br>
+  <div style="font-size:22px;font-weight:bold;margin-top:8px;">
+    ${rankText}
+  </div>
+  <div style="font-size:18px;margin-top:6px;color:${totalProfit>=0?'#00ff88':'#ff4d4d'};">
+    $${totalProfit}
+  </div>
+</div>
+`;
+}
+</script>
+
+</body>
+</html>

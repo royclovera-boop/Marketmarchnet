@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tetris HP - Final</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            touch-action: manipulation;
+        }
+
+        body {
+            background-color: #000;
+            color: white;
+            font-family: Arial, sans-serif;
+            padding: 5px;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1 {
+            font-size: 1.3rem;
+            margin: 5px 0;
+            text-align: center;
+        }
+
+        #score-area {
+            display: flex;
+            gap: 15px;
+            margin: 3px 0;
+            font-size: 1rem;
+        }
+
+        #score, #speed {
+            padding: 2px 8px;
+            background-color: rgba(50,50,50,0.7);
+            border-radius: 5px;
+        }
+
+        /* Kontainer utama dengan posisi relatif untuk tombol */
+        #game-wrapper {
+            position: relative;
+            width: 85vw;
+            max-width: 280px;
+            aspect-ratio: 1/2;
+            margin-bottom: 5px;
+        }
+
+        #game-board {
+            width: 100%;
+            height: 100%;
+            border: 1px solid white;
+            background-color: #111;
+        }
+
+        /* Tombol kontrol transparan di atas kanvas - tanpa tombol turun */
+        #on-screen-controls {
+            position: absolute;
+            bottom: 5px;
+            right: 5px;
+            display: grid;
+            grid-template-areas:
+                ". up ."
+                "left . right";
+            gap: 3px;
+        }
+
+        .control-btn {
+            width: 45px;
+            height: 45px;
+            font-size: 1.2rem;
+            background-color: rgba(50,50,50,0.5); /* Transparan */
+            color: white;
+            border: 1px solid rgba(255,255,255,0.7);
+            border-radius: 6px;
+            cursor: pointer;
+            backdrop-filter: blur(2px);
+        }
+
+        .control-btn:active {
+            background-color: rgba(100,100,100,0.7);
+            transform: scale(0.9);
+        }
+
+        #rotate-btn { grid-area: up; }
+        #left-btn { grid-area: left; }
+        #right-btn { grid-area: right; }
+
+        /* Tombol utama di bawah kanvas */
+        #main-controls {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 8px;
+        }
+
+        .main-btn {
+            padding: 5px 15px;
+            font-size: 0.9rem;
+            background-color: rgba(80,80,80,0.8);
+            color: white;
+            border: 1px solid white;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        .control-info {
+            font-size: 0.7rem;
+            color: #ccc;
+            text-align: center;
+            margin-top: 5px;
+        }
+
+        /* Tampilan game over sementara */
+        #game-over-msg {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #ff4444;
+            text-shadow: 0 0 5px black;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>TETRIS</h1>
+    <div id="score-area">
+        <div id="score">Skor: 0</div>
+        <div id="speed">Kecepatan: 1</div>
+    </div>
+
+    <div id="game-wrapper">
+        <canvas id="game-board"></canvas>
+        <div id="game-over-msg">GAME OVER<br>Mulai Ulang...</div>
+        <!-- Tombol kontrol transparan tanpa tombol turun -->
+        <div id="on-screen-controls">
+            <button class="control-btn" id="rotate-btn">↺</button>
+            <button class="control-btn" id="left-btn">←</button>
+            <button class="control-btn" id="right-btn">→</button>
+        </div>
+    </div>
+
+    <div id="main-controls">
+        <button class="main-btn" onclick="startGame()">Mulai</button>
+        <button class="main-btn" onclick="resetGame()">Reset</button>
+        <button class="main-btn" onclick="togglePause()">Jeda</button>
+    </div>
+
+    <div class="control-info">
+        <p>Kontrol Keyboard: WASD / ←→ / SPASI (putar) | P (Jeda)</p>
+    </div>
+
+    <script>
+        // Konfigurasi kompak untuk HP kecil
+        const gameWrapper = document.getElementById('game-wrapper');
+        const canvas = document.getElementById('game-board');
+        const ctx = canvas.getContext('2d');
+        const gameOverMsg = document.getElementById('game-over-msg');
+        let BLOCK_SIZE, COLS, ROWS;
+
+        // Atur ukuran kanvas lebih kecil
+        function setCanvasSize() {
+            canvas.width = gameWrapper.clientWidth;
+            canvas.height = gameWrapper.clientHeight;
+            BLOCK_SIZE = Math.floor(canvas.width / 10);
+            COLS = Math.floor(canvas.width / BLOCK_SIZE);
+            ROWS = Math.floor(canvas.height / BLOCK_SIZE);
+        }
+        setCanvasSize();
+        window.addEventListener('resize', setCanvasSize);
+
+        let grid = [];
+        let currentPiece = null;
+        let score = 0;
+        let gameLoop;
+        let isGameRunning = false;
+        let isPaused = false;
+        let speedLevel = 1;
+        const baseSpeed = 650;
+        let currentSpeed = baseSpeed;
+
+        // Warna & Bentuk Tetromino
+        const COLORS = [
+            '#00ffff', '#ffff00', '#800080', '#ffa500',
+            '#0000ff', '#00ff00', '#ff0000'
+        ];
+
+        const SHAPES = [
+            [[1, 1, 1, 1]],                  // I
+            [[1, 1], [1, 1]],                 // O
+            [[0, 1, 0], [1, 1, 1]],           // T
+            [[0, 0, 1], [1, 1, 1]],           // L
+            [[1, 0, 0], [1, 1, 1]],           // J
+            [[0, 1, 1], [1, 1, 0]],           // S
+            [[1, 1, 0], [0, 1, 1]]            // Z
+        ];
+
+        // Buat grid
+        function createGrid() {
+            return Array(ROWS).fill().map(() => Array(COLS).fill(0));
+        }
+
+        // Buat potongan baru
+        function newPiece() {
+            const idx = Math.floor(Math.random() * SHAPES.length);
+            const newP = {
+                shape: SHAPES[idx],
+                color: COLORS[idx],
+                x: Math.floor(COLS / 2) - Math.floor(SHAPES[idx][0].length / 2),
+                y: 0
+            };
+
+            // Cek langsung jika potongan baru sudah menyentuh atas atau ada blok di atas
+            if (checkCollision(newP)) {
+                gameOverHandler();
+                return null;
+            }
+            return newP;
+        }
+
+        // Gambar blok
+        function drawBlock(x, y, color) {
+            ctx.fillStyle = color;
+            ctx.fillRect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE - 1, BLOCK_SIZE - 1);
+            ctx.strokeStyle = '#333';
+            ctx.strokeRect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE - 1, BLOCK_SIZE - 1);
+        }
+
+        // Gambar permainan
+        function drawGame() {
+            ctx.fillStyle = '#111';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Gambar grid
+            for (let y = 0; y < ROWS; y++) {
+                for (let x = 0; x < COLS; x++) {
+                    if (grid[y][x]) drawBlock(x, y, grid[y][x]);
+                }
+            }
+
+            // Gambar potongan saat ini
+            if (currentPiece) {
+                currentPiece.shape.forEach((row, y) => {
+                    row.forEach((cell, x) => {
+                        if (cell) drawBlock(currentPiece.x + x, currentPiece.y + y, currentPiece.color);
+                    });
+                });
+            }
+
+            // Tampilkan jeda
+            if (isPaused) {
+                ctx.fillStyle = 'rgba(255,255,255,0.5)';
+                ctx.font = `${canvas.width/7}px Arial`;
+                ctx.textAlign = 'center';
+                ctx.fillText('PAUSED', canvas.width/2, canvas.height/2);
+            }
+
+            // Update info
+            document.getElementById('score').textContent = `Skor: ${score}`;
+            document.getElementById('speed').textContent = `Kecepatan: ${speedLevel}`;
+        }
+
+        // Cek tabrakan
+        function checkCollision(piece, dx = 0, dy = 0, rotated = false) {
+            const shape = rotated ? rotateShape(piece.shape) : piece.shape;
+            for (let y = 0; y < shape.length; y++) {
+                for (let x = 0; x < shape[y].length; x++) {
+                    if (shape[y][x]) {
+                        const newX = piece.x + x + dx;
+                        const newY = piece.y + y + dy;
+                        // Cek batas kiri/kanan/bawah, dan juga BATAS ATAS (newY < 0)
+                        if (newX < 0 || newX >= COLS || newY < 0 || newY >= ROWS || (newY >= 0 && grid[newY][newX])) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        // Rotasi bentuk
+        function rotateShape(shape) {
+            return shape[0].map((_, idx) => shape.map(row => row[idx]).reverse());
+        }
+
+        // Kunci potongan
+        function lockPiece() {
+            currentPiece.shape.forEach((row, y) => {
+                row.forEach((cell, x) => {
+                    if (cell) {
+                        grid[currentPiece.y + y][currentPiece.x + x] = currentPiece.color;
+                    }
+                });
+            });
+            clearLines();
+            currentPiece = newPiece(); // Cek game over saat membuat potongan baru
+        }
+
+        // Hapus baris
+        function clearLines() {
+            let lines = 0;
+            for (let y = ROWS - 1; y >= 0; y--) {
+                if (grid[y].every(cell => cell)) {
+                    grid.splice(y, 1);
+                    grid.unshift(Array(COLS).fill(0));
+                    y++;
+                    lines++;
+                }
+            }
+            switch(lines) {
+                case 1: score += 100; break;
+                case 2: score += 300; break;
+                case 3: score += 500; break;
+                case 4: score += 800; break;
+            }
+        }
+
+        // Update kecepatan
+        function updateSpeed() {
+            const newLevel = Math.floor(score / 800) + 1; // Naik level setiap 800 skor
+            if (newLevel > speedLevel) {
+                speedLevel = newLevel;
+                currentSpeed = baseSpeed - (speedLevel - 1) * 60;
+                currentSpeed = Math.max(currentSpeed, 80); // Batas minimal waktu
+                clearInterval(gameLoop);
+                gameLoop = setInterval(updateGame, currentSpeed);
+            }
+        }
+
+        // Update permainan
+        function updateGame() {
+            if (!isGameRunning || isPaused || !currentPiece) return;
+            if (!checkCollision(currentPiece, 0, 1)) {
+                currentPiece.y++;
+            } else {
+                lockPiece();
+            }
+            drawGame();
+        }
+
+        // Fungsi kontrol
+        function moveLeft() {
+            if (isGameRunning && !isPaused && currentPiece && !checkCollision(currentPiece, -1)) {
+                currentPiece.x--;
+                drawGame();
+            }
+        }
+
+        function moveRight() {
+            if (isGameRunning && !isPaused && currentPiece && !checkCollision(currentPiece, 1)) {
+                currentPiece.x++;
+                drawGame();
+            }
+        }
+
+        function rotatePiece() {
+            if (isGameRunning && !isPaused && currentPiece) {
+                const rotated = rotateShape(currentPiece.shape);
+                const oldShape = currentPiece.shape;
+                currentPiece.shape = rotated;
+                if (checkCollision(currentPiece)) currentPiece.shape = oldShape;
+                drawGame();
+            }
+        }
+
+        function togglePause() {
+            if (isGameRunning) {
+                isPaused = !isPaused;
+                drawGame();
+            }
+        }
+
+        // Proses game over otomatis reset dan mulai ulang
+        function gameOverHandler() {
+            isGameRunning = false;
+            clearInterval(gameLoop);
+            gameOverMsg.style.display = 'block'; // Tampilkan pesan game over
+            drawGame(); // Update tampilan terakhir
+
+            // Tunggu 2 detik lalu reset dan mulai ulang
+            setTimeout(() => {
+                gameOverMsg.style.display = 'none';
+                resetGame();
+                startGame();
+            }, 2000);
+        }
+
+        // Kontrol Keyboard
+        document.addEventListener('keydown', (e) => {
+            if (!currentPiece) return;
+            switch(e.key.toLowerCase()) {
+                case 'arrowleft': case 'a': moveLeft(); break;
+                case 'arrowright': case 'd': moveRight(); break;
+                case ' ': case 'w': rotatePiece(); break;
+                case 'p': togglePause(); break;
+                case 'r': resetGame(); break;
+            }
+        });
+
+        // Kontrol Tombol Sentuh
+        document.getElementById('left-btn').addEventListener('click', moveLeft);
+        document.getElementById('right-btn').addEventListener('click', moveRight);
+        document.getElementById('rotate-btn').addEventListener('click', rotatePiece);
+
+        // Fungsi utama
+        function startGame() {
+            if (isGameRunning) return;
+            isGameRunning = true;
+            isPaused = false;
+            score = 0;
+            speedLevel = 1;
+            currentSpeed = baseSpeed;
+            grid = createGrid();
+            currentPiece = newPiece();
+            clearInterval(gameLoop);
+            if (currentPiece) {
+                gameLoop = setInterval(updateGame, currentSpeed);
+            }
+            drawGame();
+        }
+
+        function stopGame() {
+            isGameRunning = false;
+            clearInterval(gameLoop);
+        }
+
+        function resetGame() {
+            stopGame();
+            isPaused = false;
+            grid = createGrid();
+            currentPiece = null;
+            score = 0;
+            speedLevel = 1;
+            drawGame();
+        }
+
+        // Inisialisasi
+        drawGame();
+    </script>
+</body>
+</html>

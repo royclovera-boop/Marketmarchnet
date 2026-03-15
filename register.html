@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Register</title>
+<style>
+body {
+    margin:0;
+    font-family:arial, sans-serif;
+    background:#0e1117;
+    color:white;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    height:100vh;
+}
+.register-box{
+    background:#00ff88;
+    padding:30px;
+    border-radius:10px;
+    width:320px;
+    text-align:center;
+    color:black;
+}
+input{
+    width:100%;
+    padding:10px;
+    margin:10px 0;
+    border:none;
+    border-radius:5px;
+}
+button{
+    width:100%;
+    padding:10px;
+    background:black;
+    color:#00ff88;
+    font-weight:bold;
+    border:none;
+    border-radius:5px;
+    cursor:pointer;
+}
+button:hover{opacity:0.8;}
+#otp-section{display:none; margin-top:20px;}
+</style>
+</head>
+<body>
+
+<div class="register-box">
+<h2>REGISTER</h2>
+<form id="register-form">
+    <input type="email" id="email" placeholder="Email" required><br>
+    <input type="password" id="password" placeholder="Password" required><br>
+    <button type="submit">Daftar</button>
+</form>
+
+<div id="otp-section">
+    <h3>Masukkan Kode OTP</h3>
+    <input type="text" id="otp-input" placeholder="Kode OTP"><br><br>
+    <button id="verifyBtn">Verifikasi</button>
+</div>
+</div>
+
+<!-- EmailJS -->
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+
+<script>
+// ================= EMAILJS =================
+emailjs.init("__EMAILJS_PUBLICKEY__");
+
+// ================= FIREBASE =================
+const firebaseConfig = {
+  apiKey: "__FIREBASE_APIKEY__",
+  authDomain: "__FIREBASE_AUTHDOMAIN__",
+  projectId: "__FIREBASE_PROJECTID__"
+};
+
+// Inisialisasi Firebase
+if(!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+
+// ================= REGISTER & OTP =================
+let tempEmail = "";
+let tempPassword = "";
+
+document.getElementById("register-form").addEventListener("submit", async function(e){
+    e.preventDefault();
+
+    tempEmail = document.getElementById("email").value;
+    tempPassword = document.getElementById("password").value;
+
+    // cek apakah email sudah terdaftar
+    const existing = await auth.fetchSignInMethodsForEmail(tempEmail);
+    if(existing.length > 0){
+        alert("Email sudah terdaftar! Silakan login.");
+        return;
+    }
+
+    // cek apakah masih ada OTP pending
+    const otpDoc = await db.collection("otpPending").doc(tempEmail).get();
+    if(otpDoc.exists){
+        const createdAt = otpDoc.data().createdAt.toDate();
+        const now = new Date();
+        if(now - createdAt < 5*60*1000){ // 5 menit
+            alert("OTP sudah dikirim sebelumnya. Silakan cek email Anda.");
+            document.getElementById("otp-section").style.display = "block";
+            return;
+        } else {
+            // OTP expired, hapus
+            await db.collection("otpPending").doc(tempEmail).delete();
+        }
+    }
+
+    // generate OTP 6 digit
+    const generatedOTP = Math.floor(100000 + Math.random()*900000).toString();
+
+    // simpan OTP sementara di Firestore
+    await db.collection("otpPending").doc(tempEmail).set({
+        otp: generatedOTP,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+
+    // kirim OTP ke EmailJS
+    emailjs.send("__EMAILJS_SERVICEID__", "__EMAILJS_TEMPLATEID__", {
+        to_email: tempEmail,
+        name: tempEmail,
+        email: tempEmail,
+        message: generatedOTP
+    }).then(function(){
+        alert("OTP dikirim ke email kamu ✅");
+        document.getElementById("otp-section").style.display = "block";
+    }).catch(function(error){
+        alert("Gagal kirim OTP ❌");
+        console.error(error);
+    });
+});
+
+// Verifikasi OTP
+document.getElementById("verifyBtn").addEventListener("click", async function(){
+    const userOTP = document.getElementById("otp-input").value;
+    if(!userOTP){
+        alert("Masukkan OTP terlebih dahulu!");
+        return;
+    }
+
+    const otpDoc = await db.collection("otpPending").doc(tempEmail).get();
+    if(!otpDoc.exists){
+        alert("OTP tidak ditemukan. Silakan daftar ulang.");
+        return;
+    }
+
+    const { otp, createdAt } = otpDoc.data();
+    const now = new Date();
+    if(now - createdAt.toDate() > 5*60*1000){
+        alert("OTP sudah kadaluarsa. Silakan daftar ulang.");
+        await db.collection("otpPending").doc(tempEmail).delete();
+        document.getElementById("otp-section").style.display = "none";
+        return;
+    }
+
+    if(userOTP !== otp){
+        alert("OTP salah ❌");
+        return;
+    }
+
+    // buat akun Firebase
+    try{
+        const userCredential = await auth.createUserWithEmailAndPassword(tempEmail, tempPassword);
+        const uid = userCredential.user.uid;
+
+        const expireDate = new Date();
+        expireDate.setMonth(expireDate.getMonth() + 1); // 30 hari aktif
+
+        await db.collection("users").doc(uid).set({
+            email: tempEmail,
+            isAdmin: false,
+            isActive: true,
+            subscription: true,
+            expireDate: expireDate,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+
+        // hapus OTP setelah verifikasi sukses
+        await db.collection("otpPending").doc(tempEmail).delete();
+
+        alert("Akun berhasil dibuat & aktif ✅");
+        window.location.href = "login.html";
+    } catch(err){
+        alert("Gagal membuat akun: " + err.message);
+    }
+});
+</script>
+
+</body>
+        </html>

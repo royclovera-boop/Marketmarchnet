@@ -1,0 +1,18 @@
+command = "sed -i \
+  's/__FIREBASE_APIKEY__/'\"$FIREBASE_APIKEY\"'/g; \
+   s/__FIREBASE_AUTHDOMAIN__/'\"$FIREBASE_AUTHDOMAIN\"'/g; \
+   s/__FIREBASE_PROJECTID__/'\"$FIREBASE_PROJECTID\"'/g; \
+   s/__EMAILJS_PUBLICKEY__/'\"$EMAILJS_PUBLICKEY\"'/g; \
+   s/__EMAILJS_SERVICEID__/'\"$EMAILJS_serviceid\"'/g; \
+   s/__EMAILJS_TEMPLATEID__/'\"$EMAILJS_TEMPLATEID\"'/g' \
+  adminlog.html backtes.html bulanan.html buy.html chet.html index.html \
+  kasir.html login.html main.js pay.html permainan.html register.html setting.html tahunan.html \
+  toko.html undian.html"
+publish = "."
+
+# Pengaturan keamanan
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-XSS-Protection = "1; mode=block"

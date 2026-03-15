@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pasel Susun Gambar - Geser (10x10)</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: Arial, sans-serif;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+
+        h1 {
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .example-image-container {
+            margin-bottom: 15px;
+            border: 3px solid #333;
+            padding: 5px;
+            background-color: white;
+        }
+
+        .example-image {
+            width: 800px;
+            height: 800px;
+            display: block;
+            border: 1px solid #ccc;
+        }
+
+        .example-caption {
+            text-align: center;
+            margin-top: 5px;
+            color: #555;
+            font-size: 0.9rem;
+        }
+
+        .game-container {
+            position: relative;
+            border: 5px solid #333;
+            background-color: #000;
+            overflow: hidden;
+            width: fit-content;
+            height: fit-content;
+        }
+
+        /* Potongan gambar dasar yang timbul */
+        .tile {
+            position: absolute;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            border: 2px solid #fff;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            z-index: 10;
+            transform: translateZ(5px);
+        }
+
+        .tile:not(.empty) {
+            transform: translateZ(5px);
+        }
+
+        /* Kotak kosong - 3D timbul dengan border kuning */
+        .tile.empty {
+            background-image: url('imgs/puzzle.png') !important;
+            border: 3px solid #ffd700;
+            box-shadow: 
+                0 0 0 4px rgba(255, 215, 0, 0.3),
+                0 8px 16px rgba(0,0,0,0.4),
+                inset 0 0 20px rgba(255, 215, 0, 0.2);
+            z-index: 15;
+            transform: translateZ(10px) scale(1.02);
+        }
+
+        #status {
+            margin-top: 15px;
+            font-size: 1.2rem;
+            color: #333;
+        }
+
+        #reset-btn {
+            margin-top: 10px;
+            padding: 10px 20px;
+            font-size: 1rem;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        #reset-btn:hover {
+            background-color: #45a049;
+        }
+    </style>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-storage-compat.js"></script>
+</head>
+<body>
+    <h1>Pasel Susun Gambar (10x10)</h1>
+
+    <!-- Contoh Gambar Target dari Folder imgs -->
+    <div class="example-image-container">
+        <img src="imgs/puzzle5.png" alt="Contoh Gambar Susunan Akhir" class="example-image">
+        <p class="example-caption">Contoh Gambar Target - Susunan Akhir yang Harus Dicapai (10x10)</p>
+    </div>
+
+    <div class="game-container" id="game-container"></div>
+    <div id="status"> Aktifkan fitur desktop !</div>
+    <button id="reset-btn">Acak Ulang</button>
+
+    <script>
+        // === KONFIGURASI FIREBASE ===
+                      const firebaseConfig = {
+  apiKey: "__FIREBASE_APIKEY__",
+  authDomain: "__FIREBASE_AUTHDOMAIN__",
+  projectId: "__FIREBASE_PROJECTID__"
+};
+
+// Inisialisasi Firebase
+if(!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+        // Konfigurasi Game (10x10 = 100 Kotak)
+        const CONFIG = {
+            IMAGE_PATH: 'imgs/puzzle5.png', // Gambar dari folder imgs
+            GRID_SIZE: 10, // Ukuran grid 10x10
+            TILE_SIZE: 80, // Ukuran setiap potongan (80px) → Total 800x800px
+            EMPTY_INDEX: 99 // Indeks kotak kosong (posisi terakhir)
+        };
+
+        let tiles = [];
+        const gameContainer = document.getElementById('game-container');
+        const statusText = document.getElementById('status');
+        const resetBtn = document.getElementById('reset-btn');
+
+        // Inisialisasi Kontainer Game
+        function initGameContainer() {
+            gameContainer.style.width = `${CONFIG.GRID_SIZE * CONFIG.TILE_SIZE}px`;
+            gameContainer.style.height = `${CONFIG.GRID_SIZE * CONFIG.TILE_SIZE}px`;
+        }
+
+        // Buat Semua Potongan Gambar
+        function createTiles() {
+            tiles = [];
+            for (let i = 0; i < CONFIG.GRID_SIZE * CONFIG.GRID_SIZE; i++) {
+                const tile = document.createElement('div');
+                tile.classList.add('tile');
+                tile.style.width = `${CONFIG.TILE_SIZE}px`;
+                tile.style.height = `${CONFIG.TILE_SIZE}px`;
+
+                // Hitung Posisi Background pada Gambar Asli
+                const row = Math.floor(i / CONFIG.GRID_SIZE);
+                const col = i % CONFIG.GRID_SIZE;
+                tile.style.backgroundImage = `url('${CONFIG.IMAGE_PATH}')`;
+                tile.style.backgroundPosition = `-${col * CONFIG.TILE_SIZE}px -${row * CONFIG.TILE_SIZE}px`;
+                tile.style.backgroundSize = `${CONFIG.GRID_SIZE * CONFIG.TILE_SIZE}px ${CONFIG.GRID_SIZE * CONFIG.TILE_SIZE}px`;
+
+                // Simpan Informasi Posisi
+                tile.dataset.actualIndex = i;
+                tile.dataset.currentIndex = i;
+
+                // Tambahkan Event Klik untuk Geser
+                tile.addEventListener('click', moveTile);
+
+                tiles.push(tile);
+            }
+
+            // Set Kotak Kosong
+            tiles[CONFIG.EMPTY_INDEX].classList.add('empty');
+            const emptyRow = Math.floor(CONFIG.EMPTY_INDEX / CONFIG.GRID_SIZE);
+            const emptyCol = CONFIG.EMPTY_INDEX % CONFIG.GRID_SIZE;
+            tiles[CONFIG.EMPTY_INDEX].style.backgroundPosition = `-${emptyCol * CONFIG.TILE_SIZE}px -${emptyRow * CONFIG.TILE_SIZE}px`;
+        }
+
+        // Acak Urutan dengan Algoritma Fisher-Yates
+        function shuffleTiles() {
+            let currentIndex = tiles.length;
+            let tempValue, randomIndex;
+
+            while (currentIndex !== 0) {
+                randomIndex = Math.floor(Math.random() * currentIndex);
+                currentIndex--;
+
+                // Tukar Posisi
+                tempValue = tiles[currentIndex].dataset.currentIndex;
+                tiles[currentIndex].dataset.currentIndex = tiles[randomIndex].dataset.currentIndex;
+                tiles[randomIndex].dataset.currentIndex = tempValue;
+            }
+
+            // Pastikan Hanya Satu Kotak Kosong
+            tiles.forEach((tile, idx) => {
+                if (idx === CONFIG.EMPTY_INDEX) {
+                    tile.classList.add('empty');
+                    const row = Math.floor(tile.dataset.actualIndex / CONFIG.GRID_SIZE);
+                    const col = tile.dataset.actualIndex % CONFIG.GRID_SIZE;
+                    tile.style.backgroundPosition = `-${col * CONFIG.TILE_SIZE}px -${row * CONFIG.TILE_SIZE}px`;
+                } else {
+                    tile.classList.remove('empty');
+                }
+            });
+
+            // Cek Kelayakan Puzzle
+            if (!isSolvable()) {
+                // Tukar Dua Potongan Jika Tidak Bisa Diselesaikan
+                let tileA, tileB;
+                for (let i = 0; i < tiles.length; i++) {
+                    if (!tiles[i].classList.contains('empty')) {
+                        tileA = i;
+                        break;
+                    }
+                }
+                for (let i = tileA + 1; i < tiles.length; i++) {
+                    if (!tiles[i].classList.contains('empty')) {
+                        tileB = i;
+                        break;
+                    }
+                }
+                const temp = tiles[tileA].dataset.currentIndex;
+                tiles[tileA].dataset.currentIndex = tiles[tileB].dataset.currentIndex;
+                tiles[tileB].dataset.currentIndex = temp;
+            }
+        }
+
+        // Cek Apakah Puzzle Bisa Diselesaikan (Grid Genap 10x10)
+        function isSolvable() {
+            let inversionCount = 0;
+            const tileValues = tiles.map(t => parseInt(t.dataset.currentIndex));
+            const emptyPos = parseInt(tiles[CONFIG.EMPTY_INDEX].dataset.currentIndex);
+
+            // Hitung Jumlah Inversi
+            for (let i = 0; i < tileValues.length - 1; i++) {
+                for (let j = i + 1; j < tileValues.length; j++) {
+                    if (tileValues[i] !== emptyPos && tileValues[j] !== emptyPos && tileValues[i] > tileValues[j]) {
+                        inversionCount++;
+                    }
+                }
+            }
+
+            // Hitung Baris Kosong dari Bawah
+            const emptyRowFromBottom = CONFIG.GRID_SIZE - Math.floor(emptyPos / CONFIG.GRID_SIZE);
+            // Untuk Grid Genap, Puzzle Bisa Diselesaikan Jika (Inversi + Baris Kosong dari Bawah) Genap
+            return (inversionCount + emptyRowFromBottom) % 2 === 0;
+        }
+
+        // Tampilkan Semua Potongan
+        function renderTiles() {
+            gameContainer.innerHTML = '';
+            tiles.forEach(tile => {
+                const currentIndex = parseInt(tile.dataset.currentIndex);
+                const row = Math.floor(currentIndex / CONFIG.GRID_SIZE);
+                const col = currentIndex % CONFIG.GRID_SIZE;
+                tile.style.left = `${col * CONFIG.TILE_SIZE}px`;
+                tile.style.top = `${row * CONFIG.TILE_SIZE}px`;
+                gameContainer.appendChild(tile);
+            });
+        }
+
+        // Geser Potongan yang Diklik
+        function moveTile(e) {
+            const clickedTile = e.target;
+            if (clickedTile.classList.contains('empty')) return;
+
+            const clickedIndex = parseInt(clickedTile.dataset.currentIndex);
+            const emptyIndex = parseInt(tiles[CONFIG.EMPTY_INDEX].dataset.currentIndex);
+
+            // Cek Posisi Berdekatan
+            const clickedRow = Math.floor(clickedIndex / CONFIG.GRID_SIZE);
+            const clickedCol = clickedIndex % CONFIG.GRID_SIZE;
+            const emptyRow = Math.floor(emptyIndex / CONFIG.GRID_SIZE);
+            const emptyCol = emptyIndex % CONFIG.GRID_SIZE;
+
+            const isAdjacent = (clickedRow === emptyRow && Math.abs(clickedCol - emptyCol) === 1) || 
+                               (clickedCol === emptyCol && Math.abs(clickedRow - emptyRow) === 1);
+
+            if (isAdjacent) {
+                // Tukar Posisi
+                const temp = clickedTile.dataset.currentIndex;
+                clickedTile.dataset.currentIndex = tiles[CONFIG.EMPTY_INDEX].dataset.currentIndex;
+                tiles[CONFIG.EMPTY_INDEX].dataset.currentIndex = temp;
+
+                renderTiles();
+                checkWin();
+            }
+        }
+
+        // Cek Apakah Sudah Selesai
+        function checkWin() {
+            const isWin = tiles.every(tile => {
+                return parseInt(tile.dataset.currentIndex) === parseInt(tile.dataset.actualIndex);
+            });
+
+            if (isWin) {
+                statusText.textContent = 'Selamat! Anda berhasil menyusun gambar 10x10!';
+                tiles[CONFIG.EMPTY_INDEX].classList.remove('empty');
+                renderTiles();
+                saveGameResultToFirebase();
+            } else {
+                statusText.textContent = 'Lanjutkan menyusun...';
+            }
+        }
+
+        // Simpan Hasil ke Firebase
+        function saveGameResultToFirebase() {
+            auth.onAuthStateChanged(user => {
+                if (user) {
+                    db.collection('puzzle_game_results').add({
+                        userId: user.uid,
+                        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                        gridSize: CONFIG.GRID_SIZE,
+                        imagePath: CONFIG.IMAGE_PATH
+                    })
+                    .then(docRef => console.log('Hasil disimpan dengan ID:', docRef.id))
+                    .catch(error => console.error('Error menyimpan:', error));
+                } else {
+                    console.log('Pengguna tidak login, hasil tidak disimpan');
+                }
+            });
+        }
+
+        // Reset Game
+        resetBtn.addEventListener('click', () => {
+            statusText.textContent = 'Aktifkan mode desktop!';
+            shuffleTiles();
+            renderTiles();
+        });
+
+        // Inisialisasi Saat Halaman Dimuat
+        window.addEventListener('load', () => {
+            initGameContainer();
+            createTiles();
+            shuffleTiles();
+            renderTiles();
+        });
+    </script>
+</body>
+</html>

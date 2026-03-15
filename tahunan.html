@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Catatan Trading - Tahunan</title>
+
+<script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+
+<style>
+body{
+font-family:Arial,sans-serif;
+background:#161b22;
+color:#fff;
+padding:20px;
+}
+
+.card{
+background:#1f262f;
+padding:15px;
+margin:10px 0;
+border-radius:10px;
+}
+
+#chart{
+max-width:900px;
+margin:20px auto;
+}
+
+.total-profit{
+font-size:1.5em;
+font-weight:bold;
+}
+</style>
+</head>
+
+<body>
+
+<h1>📅 Catatan Trading Tahunan</h1>
+
+<div class="card">
+<p id="usernameDisplay">Memuat user...</p>
+</div>
+
+<div class="card">
+
+<div id="chart"></div>
+
+<h3>Total P/L Tahunan</h3>
+<div id="totalPL" class="total-profit">$0</div>
+
+<h3>Rank Trading</h3>
+<div id="rankResult"></div>
+
+<hr style="margin:20px 0;opacity:0.3;">
+
+<h3>📌 Catatan Sistem</h3>
+<p style="opacity:0.7;font-size:14px;">
+Grafik hanya menampilkan tahun 2000 – 3000.  
+Tahun dibaca dari label (contoh: "Maret 2000").  
+Jika tidak ada, data sistem akan eror.
+</p>
+
+</div>
+
+<script>
+
+const firebaseConfig = {
+  apiKey: "__FIREBASE_APIKEY__",
+  authDomain: "__FIREBASE_AUTHDOMAIN__",
+  projectId: "__FIREBASE_PROJECTID__"
+};
+
+// Inisialisasi Firebase
+if(!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+
+let chart;
+let uid="";
+let displayName="";
+
+function formatDollar(number){
+return new Intl.NumberFormat("en-US",{
+style:"currency",
+currency:"USD",
+minimumFractionDigits:0
+}).format(number);
+}
+
+auth.onAuthStateChanged(user=>{
+if(user){
+uid=user.uid;
+displayName=user.email ? user.email.split("@")[0] : "User";
+document.getElementById("usernameDisplay").innerText=`Halo, ${displayName}`;
+startRealtime();
+}else{
+document.getElementById("usernameDisplay").innerText="Silakan login dulu.";
+}
+});
+
+function startRealtime(){
+
+db.collection("tradingData")
+.where("uid","==",uid)
+.onSnapshot(snapshot=>{
+
+let yearlyData={};
+let totalProfit=0;
+
+snapshot.forEach(doc=>{
+const d=doc.data();
+if(!d.pl) return;
+
+let year=null;
+
+if(d.label){
+const match=d.label.match(/20\d{2}/);
+if(match) year=parseInt(match[0]);
+}
+
+if(!year && d.timestamp){
+year=new Date(d.timestamp.seconds*1000).getFullYear();
+}
+
+if(!year) return;
+
+if(!yearlyData[year]) yearlyData[year]=0;
+yearlyData[year]+=d.pl;
+});
+
+let chartData=[];
+let runningTotal=0;
+
+Object.keys(yearlyData).sort().forEach(year=>{
+const open=runningTotal;
+const close=runningTotal+yearlyData[year];
+const high=Math.max(open,close);
+const low=Math.min(open,close);
+
+chartData.push({
+x:year,
+y:[open,high,low,close]
+});
+
+runningTotal+=yearlyData[year];
+});
+
+totalProfit=runningTotal;
+
+updateChart(chartData);
+updateRank(totalProfit);
+
+});
+}
+
+function updateChart(data){
+
+if(chart) chart.destroy();
+
+chart=new ApexCharts(document.querySelector("#chart"),{
+chart:{type:'candlestick',height:400,background:'#161b22'},
+series:[{data}],
+theme:{mode:'dark'},
+plotOptions:{candlestick:{colors:{upward:'#00ff88',downward:'#ff4d4d'}}},
+xaxis:{type:'category'}
+});
+
+chart.render();
+}
+
+function updateRank(totalProfit){
+
+let rankText="BRONZE";
+let rankIMG="IMG/bronze.png";
+let textColor="#ffffff";
+let fontSize="22px";
+let glow="none";
+
+if(totalProfit < -12000){
+rankText="UNRANKED";
+rankIMG="IMG/unranked.png";
+glow="0 0 20px red";
+}
+else if(totalProfit >= 1200000000){
+rankText="OBSIDIAN";
+rankIMG="IMG/obsidian.png";
+glow="0 0 30px #000";
+}
+else if(totalProfit >= 12000000){
+rankText="EMERALD";
+rankIMG="IMG/emerald.png";
+glow="0 0 30px #00ff88";
+}
+else if(totalProfit >= 1200000){
+rankText="DIAMOND";
+rankIMG="IMG/diamond.png";
+glow="0 0 30px #00e5ff";
+}
+else if(totalProfit >= 120000){
+rankText="GOLD";
+rankIMG="IMG/gold.png";
+textColor="#000";
+glow="0 0 30px gold";
+}
+else if(totalProfit >= 12000){
+rankText="SILVER";
+rankIMG="IMG/silver.png";
+textColor="#000";
+glow="0 0 25px #ccc";
+}
+
+const totalEl=document.getElementById("totalPL");
+totalEl.innerText=formatDollar(totalProfit);
+totalEl.style.color=totalProfit>=0?"#00ff88":"#ff4d4d";
+
+document.getElementById("rankResult").innerHTML=
+`
+<div style="
+margin-top:15px;
+display:flex;
+flex-direction:column;
+align-items:center;
+gap:10px;
+">
+<img src="${rankIMG}" style="width:80px;">
+<span style="
+font-weight:900;
+letter-spacing:3px;
+text-transform:uppercase;
+font-family:'Arial Black', Arial, sans-serif;
+font-size:${fontSize};
+color:${textColor};
+text-shadow:${glow};
+">
+${rankText}
+</span>
+</div>
+`;
+}
+
+</script>
+
+</body>
+</html>

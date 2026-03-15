@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Beli Koin</title>
+<style>
+body{ 
+  font-family:Arial; 
+  background:#f5f7fa; 
+  padding:20px; 
+  text-align:center; 
+  margin:0;
+}
+.container{ 
+  max-width:500px; 
+  margin:auto; 
+  background:white; 
+  padding:25px; 
+  border-radius:12px; 
+  box-shadow:0 5px 20px rgba(0,0,0,0.1);
+}
+.coin-img{ 
+  width:120px; 
+  margin:10px; 
+}
+input, select{ 
+  width:100%; 
+  padding:12px; 
+  margin-top:15px; 
+  border-radius:6px; 
+  border:1px solid #ccc; 
+  box-sizing:border-box;
+  font-size:16px;
+}
+button{ 
+  margin-top:20px; 
+  padding:12px 20px; 
+  background:#2ecc71; 
+  color:white; 
+  border:none; 
+  border-radius:8px; 
+  cursor:pointer; 
+  width:100%;
+  font-size:16px;
+  font-weight:bold;
+  transition:background 0.3s ease;
+}
+button:hover{ 
+  background:#27ae60; 
+}
+.status{ 
+  margin-top:15px; 
+  font-size:14px; 
+  color:#555; 
+  padding:10px;
+  border-radius:6px;
+  background:#f8f9fa;
+}
+.wa-box{ 
+  margin-top:15px; 
+  padding:15px; 
+  background:#fff3cd; 
+  border-radius:8px; 
+}
+.whatsapp-link img{ 
+  width:40px; 
+  margin-top:10px;
+}
+/* Styling untuk card informasi */
+.card{
+  margin-top:25px;
+  padding:20px;
+  background:#f8f9fa;
+  border-radius:10px;
+  border:1px solid #e9ecef;
+}
+.card h2{
+  font-size:18px;
+  color:#333;
+  margin-top:0;
+  line-height:1.5;
+}
+.card p{
+  font-size:15px;
+  color:#555;
+  margin:8px 0;
+}
+.card p b{
+  color:#2d3436;
+}
+</style>
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+</head>
+<body>
+
+<div class="container">
+<h2>🪙 Beli Koin</h2>
+<img src="IMG/lucky.png" class="coin-img" alt="Koin Lucky">
+<img src="IMG/dulax.png" class="coin-img" alt="Koin Dulax">
+
+<input type="number" id="harga" placeholder="Masukkan jumlah pembelian (Rp)" min="1">
+<input type="text" id="gmail" placeholder="Nama Gmail" readonly>
+<input type="text" id="whatsapp" placeholder="Masukkan Nomor WhatsApp (contoh: 628123456789)">
+
+<select id="namaKoin">
+  <option value="">-- Pilih Jenis Koin --</option>
+  <option value="Lucky">Lucky</option>
+  <option value="Dulax">Dulax</option>
+</select>
+
+<button onclick="buyCoin()">Buy Pending</button> 
+
+<div class="card">
+  <h2>Rp1000 = 100 koin lucky | Rp1000 = 50 koin dulax</h2>
+  <p>Transfer ke:</p>
+  <p><b>Bank Mandiri 1460020842717</b></p>
+  <p>R*********A</p>
+</div>
+
+<div class="wa-box">
+  <b>Kirim bukti transfer ke WhatsApp Admin</b><br>
+  📱 <a class="whatsapp-link" href="https://wa.me/6281528590989" target="_blank" rel="noopener noreferrer">
+  <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" alt="WhatsApp"></a>
+</div>
+
+<div class="status" id="status">Status: -</div>
+</div>
+
+<script>
+// Konfigurasi Firebase
+const firebaseConfig = {
+  apiKey: "__FIREBASE_APIKEY__",
+  authDomain: "__FIREBASE_AUTHDOMAIN__",
+  projectId: "__FIREBASE_PROJECTID__"
+};
+
+// Inisialisasi Firebase
+if(!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+let currentUserEmail = "";
+let currentUserUID = "";
+
+// Cek status login pengguna
+auth.onAuthStateChanged(user => {
+  if(!user){ 
+    window.location.href = "login.html"; 
+    return; 
+  }
+  currentUserEmail = user.email;
+  currentUserUID = user.uid;
+  document.getElementById("gmail").value = user.email;
+  console.log("Pengguna login: ", user.email);
+});
+
+// Fungsi pembelian koin - data disimpan sebagai snapchet (bukan pembeli asli)
+function buyCoin(){
+  const hargaInput = document.getElementById("harga").value.trim();
+  const wa = document.getElementById("whatsapp").value.trim();
+  const namaKoin = document.getElementById("namaKoin").value;
+  const statusElement = document.getElementById("status");
+
+  // Reset status
+  statusElement.innerText = "Status: -";
+
+  // Pengecekan input
+  if(!hargaInput || isNaN(parseInt(hargaInput)) || parseInt(hargaInput) <= 0){
+    alert("Masukkan jumlah pembelian yang valid (angka positif)!");
+    return;
+  }
+  if(!wa || !wa.startsWith("62")){
+    alert("Masukkan nomor WhatsApp dengan format benar (contoh: 628123456789)!");
+    return;
+  }
+  if(!namaKoin){
+    alert("Pilih jenis koin terlebih dahulu!");
+    return;
+  }
+
+  const harga = parseInt(hargaInput);
+  statusElement.innerText = "Status: Sedang memproses...";
+
+  // Simpan data sebagai snapchet (bukan pembeli asli) tanpa pengurutan khusus nantinya
+  db.collection("buyrequests").add({
+    uid: currentUserUID,
+    email: currentUserEmail,
+    whatsapp: wa,
+    harga: harga,
+    koin: namaKoin,
+    status: "pending",
+    date: firebase.firestore.Timestamp.now(),
+    isSnapchet: true // Menandai bahwa ini adalah data snapchet bukan pembeli asli
+  })
+  .then((docRef)=>{
+    console.log("Data snapchet tersimpan dengan ID: ", docRef.id);
+    statusElement.innerText = "Status: Pending - Menunggu konfirmasi admin. Kirim bukti transfer ke WhatsApp.";
+    // Reset input
+    document.getElementById("harga").value = "";
+    document.getElementById("whatsapp").value = "";
+    document.getElementById("namaKoin").value = "";
+  })
+  .catch(error=>{ 
+    console.error("Error menyimpan data snapchet: ", error);
+    statusElement.innerText = "Status: Gagal menyimpan data!";
+    alert("Gagal melakukan proses: " + error.message); 
+  });
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Senter</title>
+<style> 
+  body { 
+    font-family:Arial; 
+    background:#fff; 
+    padding:10px;
+    margin:0;
+    visibility: hidden;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+  body.loaded {
+    visibility: visible;
+    opacity: 1;
+  }
+  #authLoader {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 16px;
+    color: #27ae60;
+    text-align: center;
+  }
+  .logout-btn { 
+    position: absolute; 
+    top: 15px; 
+    right: 15px; 
+    padding: 8px 15px; 
+    background: #e74c3c; 
+    color: white; 
+    border: none; 
+    border-radius: 4px; 
+    cursor: pointer; 
+    font-weight: bold;
+  }
+  .logout-btn:hover { background: #c0392b;}
+  .alert{ 
+    padding:10px; 
+    border-radius:5px; 
+    margin-bottom:15px;
+    display:none;
+  }
+  .alert.success{ background:#d4edda; color:#155724; display:block; }
+  .alert.error{ background:#f8d7da; color:#721c24; display:block; }
+  .alert.warning{ background:#fff3cd; color:#856404; display:block; }
+  .container{ max-width:100%; margin:auto; }
+  h2{ text-align:center; color:#2d3436; margin:25px 0 15px; font-size:18px; }
+  h3{ color:#2d3436; margin:20px 0 10px; font-size:16px; display:flex; align-items:center; gap:8px; }
+  table{ 
+    width:100%; 
+    border-collapse:collapse; 
+    margin-top:10px;
+    background:white;
+    border:1px solid #ccc;
+  }
+  th, td{ 
+    border:1px solid #ccc; 
+    padding:10px; 
+    text-align:center;
+    font-size:14px;
+  }
+  th{ 
+    background:#2ecc71; 
+    color:white; 
+    font-weight:bold;
+  }
+  .badge {
+    padding:3px 8px;
+    border-radius:4px;
+    font-size:12px;
+    font-weight:bold;
+    color:white;
+  }
+  .badge.pending{ background:#f39c12; }
+  .badge.confirmed{ background:#27ae60; }
+  .badge.cancelled{ background:#e74c3c; }
+  .badge.lucky{ background:#3498db; }
+  .badge.snapchet{ background:#9b59b6; }
+  input{ padding:6px; border:1px solid #ccc; border-radius:4px; margin:5px 0; width:100%; max-width:200px; }
+  .input-group{ display:flex; gap:5px; align-items:center; flex-wrap:wrap; justify-content:center; }
+  .input-group label{ font-size:13px; font-weight:bold; color:#2d3436; }
+  .btn-group{ display:flex; gap:5px; justify-content:center; margin:5px 0; flex-wrap:wrap; }
+  .btn{ 
+    padding:6px 12px; 
+    border:none; 
+    border-radius:4px; 
+    cursor:pointer;
+    font-size:13px;
+  }
+  .btn.confirm{ background:#27ae60; color:white; }
+  .btn.confirm:hover{ background:#219150; }
+  .btn.delete{ background:#e74c3c; color:white; }
+  .btn.delete:hover{ background:#c0392b; }
+  .empty-state{ 
+    text-align:center; 
+    color:#7f8c8d; 
+    padding:30px 10px; 
+    background:white;
+    border:1px solid #ccc;
+    border-top:none;
+  }
+</style>
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+</head>
+<body>
+  <button class="logout-btn" onclick="logout()">Keluar</button>
+  <div id="authLoader">Memverifikasi akses</div>
+
+  <div class="container">
+    <h2>📜 Kelola Semua Transaksi</h2>
+    <div id="alertMessage" class="alert"></div>
+
+    <!-- Tabel 1: Buy Requests - Undian (Paket Nama) -->
+    <h3>🎟️ Buy Requests (Besar R) - Undian (Paket Nama)</h3>
+    <div id="undianTableContainer">
+      <table id="undianTable">
+        <thead>
+          <tr>
+            <th>Email Pengguna</th>
+            <th>Nomor WhatsApp</th>
+            <th>Paket</th>
+            <th>Koin</th>
+            <th>Biaya Koin</th>
+            <th>Masuk Undian</th>
+            <th>Status</th>
+            <th>Aksi</th>
+          </tr>
+        </thead>
+        <tbody id="undianTableBody"></tbody>
+      </table>
+    </div>
+
+    <!-- Tabel 2: Buy Requests - Beli Koin -->
+    <h3>💰 buyrequests (Semua Kecil) - Beli Koin</h3>
+    <div id="beliKoinTableContainer">
+      <table id="beliKoinTable">
+        <thead>
+          <tr>
+            <th>Email Pengguna</th>
+            <th>Nomor WhatsApp</th>
+            <th>Koin</th>
+            <th>Harga (Rp)</th>
+            <th>Snapchat</th>
+            <th>Status</th>
+            <th>Aksi</th>
+          </tr>
+        </thead>
+        <tbody id="beliKoinTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+<script>
+// Konfigurasi Firebase
+const firebaseConfig = {
+  apiKey: "__FIREBASE_APIKEY__",
+  authDomain: "__FIREBASE_AUTHDOMAIN__",
+  projectId: "__FIREBASE_PROJECTID__"
+};
+
+// Inisialisasi Firebase
+if(!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+const FieldValue = firebase.firestore.FieldValue;
+
+// Tampilkan Pesan Alert
+function showAlert(message, isSuccess = true) {
+  const alertEl = document.getElementById('alertMessage');
+  if (isSuccess === null) {
+    alertEl.className = "alert warning";
+  } else {
+    alertEl.className = `alert ${isSuccess ? 'success' : 'error'}`;
+  }
+  alertEl.textContent = message;
+  alertEl.style.display = 'block';
+  setTimeout(() => alertEl.style.display = 'none', 5000);
+}
+
+// Fungsi Logout
+function logout() {
+  auth.signOut().then(() => {
+    window.location.href = "login.html";
+  }).catch(error => {
+    showAlert("Gagal keluar: " + error.message, false);
+  });
+}
+
+// Cek Hak Akses Admin
+async function checkAdminAccess(user) {
+  try {
+    const userDoc = await db.collection("users").doc(user.uid).get();
+    if (!userDoc.exists || !userDoc.data()?.Isadmin) {
+      document.body.innerHTML = `<div class="alert error" style="display:block; margin:20px;">Anda tidak memiliki hak akses admin!</div>`;
+      setTimeout(() => window.location.href = "index.html", 2000);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    showAlert("Gagal memverifikasi hak akses: " + error.message, false);
+    return false;
+  }
+}
+
+// Format Tanggal dari Timestamp Firebase
+function formatTanggal(timestamp) {
+  if (!timestamp) return "-";
+  const date = new Date(timestamp.toDate());
+  return date.toLocaleString("id-ID", {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit'
+  });
+}
+
+// Muat Data dari Koleksi buyRequests (BESAR R) - Undian (Paket Nama)
+async function loadUndianTransactions() {
+  const tableBody = document.getElementById('undianTableBody');
+  tableBody.innerHTML = `<tr><td colspan="8" style="color:#7f8c8d;">Memuat data transaksi undian...</td></tr>`;
+
+  try {
+    const snapshot = await db.collection("buyRequests")
+      .orderBy("createdAt", "desc")
+      .get();
+
+    const undianData = [];
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      if (data.paket !== undefined && data.paket !== null) {
+        undianData.push({ id: doc.id, ...data });
+      }
+    });
+
+    if (undianData.length === 0) {
+      tableBody.innerHTML = `<tr><td colspan="8" class="empty-state">Tidak ada transaksi undian di koleksi buyRequests.</td></tr>`;
+      return;
+    }
+
+    tableBody.innerHTML = "";
+    undianData.forEach(item => {
+      const tanggal = item.createdAt ? formatTanggal(item.createdAt) : "-";
+      const isSnapchetVal = item.isSnapchet || false;
+      const perkiraanKoin = item.biaya || 0;
+
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td>${item.email || "-"}</td>
+        <td>${item.whatsapp || "-"}</td>
+        <td>${item.paket || "-"}</td>
+        <td><span class="badge lucky">${item.koin || "-"}</span></td>
+        <td>${item.biaya ? item.biaya.toLocaleString("id-ID") : 0}</td>
+        <td>${item.masukUndian ? item.masukUndian.toLocaleString("id-ID") : 0}</td>
+        <td><span class="badge ${item.status}">${item.status.toUpperCase()}</span></td>
+        <td class="btn-group">
+          ${item.status === "pending" ? `
+            <input type="text" id="bukti-undian-${item.id}" placeholder="Link bukti">
+            <button class="btn confirm" onclick="confirmUndianTransaction('${item.id}', '${item.uid || ""}', ${isSnapchetVal})">Konfirmasi</button>
+            <button class="btn delete" onclick="cancelTransaction('${item.id}', ${isSnapchetVal}, 'buyRequests')">Batalkan</button>
+          ` : `<span style="font-size:12px; color:#7f8c8d;">Tidak ada aksi</span>`}
+        </td>
+      `;
+      tableBody.appendChild(row);
+    });
+
+  } catch (error) {
+    console.error("Error memuat transaksi undian:", error);
+    tableBody.innerHTML = `<tr><td colspan="8" class="empty-state">Gagal memuat data undian: ${error.message}</td></tr>`;
+    showAlert("Gagal memuat transaksi undian: " + error.message, false);
+  }
+}
+
+// Muat Data dari Koleksi buyrequests (SEMUA KECIL) - Beli Koin
+async function loadBeliKoinTransactions() {
+  const tableBody = document.getElementById('beliKoinTableBody');
+  tableBody.innerHTML = `<tr><td colspan="7" style="color:#7f8c8d;">Memuat data transaksi beli koin...</td></tr>`;
+
+  try {
+    const snapshot = await db.collection("buyrequests")
+      .orderBy("date", "desc")
+      .get();
+
+    const beliKoinData = [];
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      if (data.harga !== undefined && data.harga !== null) {
+        beliKoinData.push({ id: doc.id, ...data });
+      }
+    });
+
+    if (beliKoinData.length === 0) {
+      tableBody.innerHTML = `<tr><td colspan="7" class="empty-state">Tidak ada transaksi beli koin di koleksi buyrequests.</td></tr>`;
+      return;
+    }
+
+    tableBody.innerHTML = "";
+    beliKoinData.forEach(item => {
+      const tanggal = item.date ? formatTanggal(item.date) : "-";
+      const isSnapchetBadge = item.isSnapchet ? `<span class="badge snapchet">Ya</span>` : `<span class="badge pending">Tidak</span>`;
+      const isSnapchetVal = item.isSnapchet || false;
+      const perkiraanKoin = Math.floor((item.harga || 0) / 50);
+
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td>${item.email || "-"}</td>
+        <td>${item.whatsapp || "-"}</td>
+        <td><span class="badge lucky">${item.koin || "-"}</span></td>
+        <td>Rp ${item.harga ? item.harga.toLocaleString("id-ID") : 0}</td>
+        <td>${isSnapchetBadge}</td>
+        <td><span class="badge ${item.status}">${item.status.toUpperCase()}</span></td>
+        <td>
+          ${item.status === "pending" ? `
+            <div class="input-group">
+              <input type="text" id="bukti-beli-${item.id}" placeholder="Link bukti">
+            </div>
+            <div class="input-group">
+              <label>Jumlah ${item.koin || "Lucky"} Koin:</label>
+              <input type="number" id="jumlah-koin-${item.id}" placeholder="Perkiraan: ${perkiraanKoin}" min="1" required>
+            </div>
+            <div class="btn-group">
+              <button class="btn confirm" onclick="confirmBeliKoinTransaction('${item.id}', '${item.uid || ""}', '${item.koin || "Lucky"}', ${isSnapchetVal})">Konfirmasi</button>
+              <button class="btn delete" onclick="cancelTransaction('${item.id}', ${isSnapchetVal}, 'buyrequests')">Batalkan</button>
+            </div>
+          ` : `<span style="font-size:12px; color:#7f8c8d;">Tidak ada aksi</span>`}
+        </td>
+      `;
+      tableBody.appendChild(row);
+    });
+
+  } catch (error) {
+    console.error("Error memuat transaksi beli koin:", error);
+    tableBody.innerHTML = `<tr><td colspan="7" class="empty-state">Gagal memuat data beli koin: ${error.message}</td></tr>`;
+    showAlert("Gagal memuat transaksi beli koin: " + error.message, false);
+  }
+}
+
+// Muat Semua Transaksi
+async function loadAllTransactions() {
+  await Promise.all([
+    loadUndianTransactions(),
+    loadBeliKoinTransactions()
+  ]);
+}
+
+// Konfirmasi Transaksi Undian dari Koleksi buyRequests (BESAR R)
+async function confirmUndianTransaction(docId, userId, isSnapchet) {
+  const buktiInput = document.getElementById(`bukti-undian-${docId}`);
+  const buktiLink = buktiInput ? buktiInput.value.trim() : "";
+
+  if (buktiLink && !buktiLink.startsWith("http")) {
+    showAlert("Link bukti harus dimulai dengan http:// atau https://!", false);
+    return;
+  }
+
+  try {
+    showAlert("Sedang memproses konfirmasi undian...");
+    
+    const transaksiDoc = await db.collection("buyRequests").doc(docId).get();
+    if (!transaksiDoc.exists) {
+      showAlert("Transaksi undian tidak ditemukan di koleksi buyRequests!", false);
+      return;
+    }
+    const data = transaksiDoc.data();
+
+    if (!userId || !data.koin ||
+ data.biaya === undefined || data.masukUndian === undefined) {
+      showAlert("Data transaksi tidak lengkap!", false);
+      return;
+    }
+
+    // 1. Siapkan data lengkap untuk riwayat
+    const fullData = {
+      ...data,
+      buyRequestId: docId,
+      buktiTransfer: buktiLink || "-",
+      status: "confirmed",
+      processedAt: FieldValue.serverTimestamp(),
+      koleksiAsal: "buyRequests"
+    };
+
+    // 2. Pindahkan ke koleksi riwayatTransaksi
+    await db.collection("riwayatTransaksi").add(fullData);
+
+    // 3. Hapus dari koleksi buyRequests (BESAR R)
+    await db.collection("buyRequests").doc(docId).delete();
+
+    // 4. Hapus dari koleksi snapchet jika ada
+    if (isSnapchet) {
+      const snapchetSnapshot = await db.collection("snapchetTransactions").where("buyRequestId", "==", docId).get();
+      snapchetSnapshot.forEach(snapDoc => snapDoc.ref.delete());
+    }
+
+    // 5. Kurangi saldo koin pengguna
+    const userRef = db.collection("users").doc(userId);
+    const userDoc = await userRef.get();
+    
+    if (userDoc.exists) {
+      const currentData = userDoc.data();
+      const coinField = data.koin === "Lucky" ? "luckyCoin" : "dulaxCoin";
+      const currentSaldo = currentData[coinField] || 0;
+
+      if (currentSaldo < data.biaya) {
+        showAlert(`Saldo ${data.koin} tidak cukup! Saldo saat ini: ${currentSaldo}`, false);
+        // Kembalikan data ke koleksi buyRequests jika saldo tidak cukup
+        await db.collection("buyRequests").doc(docId).set(fullData);
+        return;
+      }
+
+      await userRef.update({
+        [coinField]: currentSaldo - data.biaya,
+        updatedAt: FieldValue.serverTimestamp()
+      });
+    } else {
+      showAlert("Data pengguna tidak ditemukan, proses dibatalkan!", false);
+      return;
+    }
+
+    // 6. Tambahkan ke pool undian
+    const poolField = data.koin === "Lucky" ? "luckyFilled" : "dulaxFilled";
+    await db.collection("raffleData").doc("main").update({
+      [poolField]: FieldValue.increment(data.masukUndian),
+      updatedAt: FieldValue.serverTimestamp()
+    });
+
+    showAlert("Transaksi undian berhasil dikonfirmasi! Saldo dikurangi dan nilai masuk ke undian.", true);
+    loadUndianTransactions();
+
+  } catch (error) {
+    console.error("Error konfirmasi undian:", error);
+    // Kembalikan data jika terjadi error
+    if (transaksiDoc.exists) {
+      await db.collection("buyRequests").doc(docId).set(data);
+    }
+    showAlert("Gagal konfirmasi undian: " + error.message, false);
+  }
+}
+
+// Konfirmasi Transaksi Beli Koin dari Koleksi buyrequests (SEMUA KECIL)
+async function confirmBeliKoinTransaction(docId, userId, koinType, isSnapchet) {
+  const buktiInput = document.getElementById(`bukti-beli-${docId}`);
+  const buktiLink = buktiInput ? buktiInput.value.trim() : "";
+  
+  // Ambil input jumlah koin yang diisi admin
+  const jumlahKoinInput = document.getElementById(`jumlah-koin-${docId}`);
+  const jumlahKoin = parseInt(jumlahKoinInput ? jumlahKoinInput.value.trim() : "");
+
+  // Validasi input
+  if (buktiLink && !buktiLink.startsWith("http")) {
+    showAlert("Link bukti harus dimulai dengan http:// atau https://!", false);
+    return;
+  }
+  if (isNaN(jumlahKoin) || jumlahKoin < 1) {
+    showAlert(`Jumlah ${koinType} Koin harus diisi dan lebih besar dari 0!`, false);
+    return;
+  }
+
+  try {
+    showAlert("Sedang memproses konfirmasi beli koin...");
+    
+    // Ambil data dari koleksi buyrequests (SEMUA KECIL)
+    const transaksiDoc = await db.collection("buyrequests").doc(docId).get();
+    if (!transaksiDoc.exists) {
+      showAlert("Transaksi beli koin tidak ditemukan di koleksi buyrequests!", false);
+      return;
+    }
+    const data = transaksiDoc.data();
+
+    if (!userId || !koinType || data.harga === undefined) {
+      showAlert("Data transaksi tidak lengkap!", false);
+      return;
+    }
+
+    // 1. Siapkan data lengkap untuk riwayat
+    const fullData = {
+      ...data,
+      buyRequestId: docId,
+      buktiTransfer: buktiLink || "-",
+      status: "confirmed",
+      jumlahKoin: jumlahKoin, // Gunakan jumlah koin yang diisi admin
+      jumlahKoinPerkiraan: Math.floor(data.harga / 50), // Simpan perkiraan untuk referensi
+      processedAt: FieldValue.serverTimestamp(),
+      koleksiAsal: "buyrequests"
+    };
+
+    // 2. Pindahkan ke koleksi riwayatTransaksi
+    await db.collection("riwayatTransaksi").add(fullData);
+
+    // 3. Hapus dari koleksi buyrequests (SEMUA KECIL)
+    await db.collection("buyrequests").doc(docId).delete();
+
+    // 4. Hapus dari koleksi snapchet jika ada
+    if (isSnapchet) {
+      const snapchetSnapshot = await db.collection("snapchetTransactions").where("buyRequestId", "==", docId).get();
+      snapchetSnapshot.forEach(snapDoc => snapDoc.ref.delete());
+    }
+
+    // 5. Tambahkan saldo koin ke pengguna
+    const userRef = db.collection("users").doc(userId);
+    const userDoc = await userRef.get();
+    
+    if (userDoc.exists) {
+      const currentData = userDoc.data();
+      const coinField = koinType === "Lucky" ? "luckyCoin" : "dulaxCoin";
+      
+      await userRef.update({
+        [coinField]: (currentData[coinField] || 0) + jumlahKoin,
+        updatedAt: FieldValue.serverTimestamp()
+      });
+    } else {
+      showAlert("Data pengguna tidak ditemukan, namun transaksi tetap dikonfirmasi dan koin disimpan!", null);
+      // Simpan koin ke koleksi cadangan jika pengguna tidak ditemukan
+      await db.collection("cadanganKoin").add({
+        userId: userId,
+        koinType: koinType,
+        jumlahKoin: jumlahKoin,
+        createdAt: FieldValue.serverTimestamp()
+      });
+    }
+
+    showAlert(`Transaksi beli koin berhasil! ${jumlahKoin} ${koinType} ditambahkan ke saldo.`, true);
+    loadBeliKoinTransactions();
+
+  } catch (error) {
+    console.error("Error konfirmasi beli koin:", error);
+    showAlert("Gagal konfirmasi beli koin: " + error.message, false);
+  }
+}
+
+// Batalkan Transaksi (UMUM UNTUK SEMUA KOLEKSI)
+async function cancelTransaction(docId, isSnapchet, koleksiAsal) {
+  if (!confirm("Apakah Anda yakin ingin membatalkan transaksi ini?")) return;
+
+  try {
+    showAlert("Sedang memproses pembatalan...");
+    
+    // Ambil data transaksi terbaru
+    const transaksiDoc = await db.collection(koleksiAsal).doc(docId).get();
+    if (!transaksiDoc.exists) {
+      showAlert("Transaksi tidak ditemukan!", false);
+      return;
+    }
+    const data = transaksiDoc.data();
+
+    // 1. Pindahkan ke koleksi riwayatPembatalan
+    await db.collection("riwayatPembatalan").add({
+      ...data,
+      buyRequestId: docId,
+      alasanPembatalan: "Dibatalkan oleh admin",
+      tanggalPembatalan: FieldValue.serverTimestamp(),
+      koleksiAsal: koleksiAsal
+    });
+
+    // 2. Hapus dari koleksi asal
+    await db.collection(koleksiAsal).doc(docId).delete();
+
+    // 3. Hapus dari snapchet jika ada
+    if (isSnapchet) {
+      const snapchetSnapshot = await db.collection("snapchetTransactions").where("buyRequestId", "==", docId).get();
+      snapchetSnapshot.forEach(snapDoc => snapDoc.ref.delete());
+    }
+
+    showAlert("Transaksi berhasil dibatalkan dan dipindahkan ke riwayat pembatalan.", true);
+    loadAllTransactions();
+
+  } catch (error) {
+    console.error("Error membatalkan transaksi:", error);
+    showAlert("Gagal membatalkan transaksi: " + error.message, false);
+  }
+}
+
+// Verifikasi Admin Saat Halaman Dimuat
+auth.onAuthStateChanged(async user => {
+  if (user) {
+    const isAdmin = await checkAdminAccess(user);
+    if (isAdmin) {
+      document.body.classList.add("loaded");
+      loadAllTransactions();
+    }
+  } else {
+    window.location.href = "login.html";
+  }
+});
+</script>
+</body>
+</html>

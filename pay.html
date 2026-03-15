@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Perpanjang Langganan</title>
+
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+
+<style>
+body {
+    margin:0;
+    font-family:Arial, sans-serif;
+    background:#0f1115;
+    color:#fff;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    height:100vh;
+}
+.card {
+    background:#1a1c22;
+    padding:30px;
+    border-radius:15px;
+    box-shadow:0 4px 20px rgba(0,0,0,0.5);
+    width:350px;
+    text-align:center;
+    position:relative;
+}
+h2 { color:#00ff88; margin-bottom:15px; }
+p { margin:5px 0; }
+
+button {
+    background:#00ff88;
+    color:black;
+    font-weight:bold;
+    padding:12px;
+    border:none;
+    border-radius:8px;
+    width:100%;
+    margin-top:20px;
+    cursor:pointer;
+}
+button:hover { transform:scale(1.05); }
+button:disabled { background:gray; cursor:not-allowed; }
+
+.back-btn{
+    background:#444;
+    color:white;
+    margin-top:10px;
+}
+.back-btn:hover{
+    background:#666;
+}
+
+.status { margin-top:10px; font-weight:bold; color:#ffdd00; }
+.whatsapp-link img { width:100%; height:100%; }
+</style>
+</head>
+<body>
+
+<div class="card">
+    <h2>Perpanjang Akun 30 hari</h2>
+    <p>Transfer ke:</p>
+    <p><b>Bank Mandiri 1460020842717</b></p>
+    <p>R*********A</p>
+    <p>Total: <b>Rp 2500</b></p>
+
+    <button id="transferBtn">Transfer</button>
+    <button class="back-btn" onclick="window.location.href='login.html'">Kembali</button>
+
+    <div class="status" id="statusText"></div>
+    <div class="keterangan">Kirim bukti transfer via WhatsApp jika sudah transfer</div>
+
+    <a class="whatsapp-link" href="https://wa.me/6281528590989" target="_blank">
+        <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" alt="WhatsApp">
+    </a>
+</div>
+
+<script>
+const firebaseConfig = {
+  apiKey: "__FIREBASE_APIKEY__",
+  authDomain: "__FIREBASE_AUTHDOMAIN__",
+  projectId: "__FIREBASE_PROJECTID__"
+};
+
+// Inisialisasi Firebase
+if(!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+const transferBtn = document.getElementById("transferBtn");
+const statusText = document.getElementById("statusText");
+
+// Cek login
+auth.onAuthStateChanged(async user=>{
+  if(!user){
+    alert("Silakan login dulu");
+    window.location.href="login.html";
+    return;
+  }
+
+  const pending = await db.collection("pendingPayments")
+      .where("uid", "==", user.uid)
+      .where("status", "==", "pending")
+      .get();
+
+  if(!pending.empty){
+      transferBtn.disabled = true;
+      statusText.innerText = "Status: Pending ⏳\nTunggu admin konfirmasi.";
+  } else {
+      transferBtn.disabled = false;
+      statusText.innerText = "";
+  }
+});
+
+// Tombol transfer
+transferBtn.addEventListener("click", async ()=>{
+    const user = auth.currentUser;
+    if(!user) return;
+
+    const pending = await db.collection("pendingPayments")
+        .where("uid", "==", user.uid)
+        .where("status", "==", "pending")
+        .get();
+
+    if(!pending.empty){
+        alert("Masih ada transfer pending. Tunggu konfirmasi admin.");
+        transferBtn.disabled = true;
+        statusText.innerText = "Status: Pending ⏳\nTunggu admin konfirmasi.";
+        return;
+    }
+
+    try {
+        await db.collection("pendingPayments").add({
+            uid: user.uid,
+            email: user.email,
+            amount: 2500,
+            status: "pending",
+            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        alert("Transfer berhasil dicatat ✅\nAdmin akan memproses segera.");
+        transferBtn.disabled = true;
+        statusText.innerText = "Status: Pending ⏳\nTunggu admin konfirmasi.";
+    } catch(err){
+        console.error(err);
+        alert("Gagal mencatat transfer ❌");
+    }
+});
+</script>
+
+</body>
+</html>

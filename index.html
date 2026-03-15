@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trading Journal</title>
+
+<!-- 🔒 PREVENT FLASH BEFORE AUTH -->
+<style> body { display: none; } </style>
+
+<!-- ApexCharts & html2pdf -->
+<script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-storage-compat.js"></script>
+
+<link rel="stylesheet" href="style.css">
+
+<style>
+/* Sidebar */
+#sidebar {
+  position: fixed; left: -220px; top: 0; width: 220px; height: 100%;
+  background: #111; color: #fff; transition: 0.3s; z-index: 999;
+  padding-top: 60px;
+}
+#sidebar.active { left: 0; }
+#sidebar a {
+  display: block; padding: 12px 20px; color: #fff; text-decoration: none;
+  transition: 0.2s;
+}
+#sidebar a:hover { background: #333; }
+#sidebarToggle {
+  position: fixed; top: 15px; left: 15px;
+  background: #222; color: #fff; border: none;
+  font-size: 24px; cursor: pointer; border-radius: 6px;
+  width: 40px; height: 40px; z-index: 1000;
+}
+
+/* Container bergeser saat sidebar terbuka */
+.container { transition: margin-left 0.3s; margin-left: 0; }
+.container.shift { margin-left: 220px; }
+
+/* Logout button */
+#logoutBtn {
+  position: fixed; top: 15px; right: 15px;
+  background: red; color: white; border: none;
+  padding: 8px 15px; border-radius: 6px;
+  cursor: pointer; z-index: 999;
+}
+
+/* Card */
+.card { background:#161b22; padding:15px; margin:10px 0; border-radius:10px; color:#fff; }
+.top-card div { margin-bottom:10px; }
+.top-card label { display:block; margin-bottom:4px; }
+.rank-box { margin-top:20px; text-align:center; }
+.rank-box IMG { vertical-align:middle; margin-right:8px; width:100px; border-radius:5px; }
+
+IMG#fotoPreview { display:block; margin-top:10px; border-radius:50%; width:80px; }
+</style>
+</head>
+<body>
+
+<!-- Sidebar Toggle -->
+<button id="sidebarToggle">☰</button>
+
+<!-- Sidebar -->
+<div id="sidebar">
+  <a href="index.html">🏠 Rumah</a>
+  <a href="toko.html">🛒 Toko</a>
+  <a href="#" id="adminSidebar" style="display:none;">🛠️ Admin Log</a>
+  <a href="setting.html">⚙️ pengaturan</a>
+  <a href="kasir.html"> 🔦 Cahaya</a>
+  <a href="tahunan.html">📗 Catatan tahunan</a>
+  <a href="bulanan.html">📝 Catatan bulanan</a>
+  <a href="backtes.html"> 🎮   Backtes strategi </a>
+  <a href="permainan.html">🕹️   Permainan  </a
+  <a href="undian.html"> 🗳️   Undian berhadiah  </a>
+  
+  
+</div>
+
+<!-- Logout -->
+<button id="logoutBtn">Logout</button>
+
+<!-- Journal Container -->
+<div class="container" id="journal">
+  <h1>Trading Journal</h1>
+
+  <div class="card top-card">
+    <div>
+      <label>Saldo Awal</label>
+      <input type="number" id="saldoAwal" value="0">
+    </div>
+    <div>
+      <label>Mata Uang</label>
+      <select id="currency">
+        <option value="IDR">IDR (Rp)</option>
+        <option value="USD">USD ($)</option>
+      </select>
+    </div>
+    <div>
+      <label>Tanggal Mulai</label>
+      <input type="date" id="startDate">
+    </div>
+    <div>
+      <label>Tanggal Akhir</label>
+      <input type="date" id="endDate">
+    </div>
+    <div>
+      <button id="generateRange">Tampilkan</button>
+      <button id="downloadPdf">Download PDF</button>
+    </div>
+  </div>
+
+  <div class="card table-card">
+    <table>
+      <thead>
+        <tr>
+          <th>Tanggal</th>
+          <th>P/L</th>
+          <th>Saldo</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <div class="card chart-card">
+    <div id="chart"></div>
+    <div class="rank-box">
+      <h3>RANK TRADING</h3>
+      <div id="rankResult">
+        <IMG src="IMG/newbie.png" alt="Rank"> 🥉 Newbie
+      </div>
+    </div>
+  </div>
+
+  <div style="text-align:center; margin-top:20px;">
+    <button id="renewSubscription" style="background:orange; color:black; border:none; padding:10px 20px; border-radius:8px; font-weight:bold; cursor:pointer;">
+      Perpanjang Akun
+    </button>
+    <p style="margin-top:5px; font-size:0.9em; color:#ccc;">
+      Kirim bukti transfer via WhatsApp setelah klik tombol
+    </p>
+    <a href="https://wa.me/6281528590989" target="_blank">
+      <IMG src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" alt="WhatsApp" width="40">
+    </a>
+  </div>
+
+</div>
+
+<script>
+let chart;
+const tbody = document.getElementById("tbody");
+const firebaseConfig = {
+  apiKey: "__FIREBASE_APIKEY__",
+  authDomain: "__FIREBASE_AUTHDOMAIN__",
+  projectId: "__FIREBASE_PROJECTID__"
+};
+
+// Inisialisasi Firebase
+if(!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+const storage = firebase.storage();
+
+const sidebar = document.getElementById("sidebar");
+const sidebarToggle = document.getElementById("sidebarToggle");
+const container = document.querySelector(".container");
+
+sidebarToggle.addEventListener("click", ()=>{
+  sidebar.classList.toggle("active");
+  container.classList.toggle("shift");
+});
+
+function formatCurrency(val){
+  let currency = document.getElementById("currency").value;
+  return currency==="USD"? "$ "+val.toLocaleString("en-US") : "Rp "+val.toLocaleString("id-ID");
+}
+
+function formatDate(date){
+  let d = date.getDate().toString().padStart(2,'0');
+  let m = (date.getMonth()+1).toString().padStart(2,'0');
+  let y = date.getFullYear();
+  return `${d}-${m}-${y}`;
+}
+
+function generateRange(){
+  let startVal = document.getElementById("startDate").value;
+  let endVal = document.getElementById("endDate").value;
+  if(!startVal || !endVal){ alert("Pilih tanggal dulu!"); return; }
+
+  let start = new Date(startVal);
+  let end = new Date(endVal);
+  if(end<start){ alert("Tanggal akhir tidak boleh sebelum tanggal mulai!"); return; }
+
+  tbody.innerHTML="";
+  let diffDays = Math.floor((end-start)/(1000*60*60*24))+1;
+  for(let i=0;i<diffDays;i++){
+    let currentDate = new Date(start);
+    currentDate.setDate(start.getDate()+i);
+    tbody.innerHTML += `<tr>
+        <td class="tanggal">${formatDate(currentDate)}</td>
+        <td><input type="number" class="pl"></td>
+        <td class="saldo">0</td>
+    </tr>`;
+  }
+  hitung();
+}
+
+// Fungsi utama hitung & update chart + rank
+function hitung(){
+  let saldoAwal = parseFloat(document.getElementById("saldoAwal").value)||0;
+  let saldo = saldoAwal;
+  let prev = saldoAwal;
+  let candleData = [];
+
+  document.querySelectorAll("#tbody tr").forEach((row,index)=>{
+    let input = row.querySelector(".pl");
+    let saldoCell = row.querySelector(".saldo");
+    let pl = parseFloat(input.value)||0;
+
+    saldo += pl;
+    saldoCell.innerText = formatCurrency(saldo);
+
+    let open = prev;
+    let close = saldo;
+    let high = Math.max(open,close);
+    let low = Math.min(open,close);
+
+    candleData.push({x:index+1,y:[open,high,low,close]});
+    prev = saldo;
+  });
+
+  updateChart(candleData);
+  updateRank(saldo - parseFloat(document.getElementById("saldoAwal").value)||0);
+
+  // 🔹 Simpan otomatis ke localStorage setiap kali data berubah
+  localStorage.setItem("journalData", document.getElementById("journal").innerHTML);
+}
+
+function updateChart(data){
+  if(chart) chart.destroy();
+  chart = new ApexCharts(document.querySelector("#chart"),{
+    chart:{type:'candlestick',height:400,background:'#161b22'},
+    series:[{data:data}],
+    theme:{mode:'dark'},
+    plotOptions:{candlestick:{colors:{upward:'#00ff88',downward:'#ff4d4d'}}},
+    xaxis:{type:'category'}
+  });
+  chart.render();
+}
+
+// Rank & Foto
+function updateRank(totalProfit){
+  let rankText=" Newbie", rankIMG="IMG/newbie.png";
+
+  if(totalProfit>=100000000){ rankText=" mythic "; rankIMG="IMG/mythic.png"; }
+  else if(totalProfit>=10000000){ rankText=" Legend"; rankIMG="IMG/legend.png"; }
+  else if(totalProfit>=1000000){ rankText=" Master "; rankIMG="IMG/master.png"; }
+  else if(totalProfit>=100000){ rankText=" Elit"; rankIMG="IMG/elit.png"; }
+  else if(totalProfit>=10000){ rankText=" Pro"; rankIMG="IMG/pro.png"; }
+  else if(totalProfit>=1000){ rankText=" Rookie"; rankIMG="IMG/rookie.png"; }
+  else if(totalProfit<-10000000){ rankText="underdog"; rankIMG="IMG/underdog.png"; }
+  else if(totalProfit<-1000000){ rankText="gembler"; rankIMG="IMG/gembler.png"; }
+  else if(totalProfit<-100000){ rankText="bot"; rankIMG="IMG/bot.png"; }
+  else if(totalProfit<-10000){ rankText=" Noob";rankIMG="IMG/noob.png"; }
+  else if(totalProfit<-1000){ rankText="unranked";rankIMG="IMG/unranked.png"; }
+
+  document.getElementById("rankResult").innerHTML = `<IMG src="${rankIMG}" alt="Rank">${rankText}`;
+}
+
+// Sidebar Admin
+const adminSidebar = document.getElementById("adminSidebar");
+adminSidebar.style.display = "none";
+
+auth.onAuthStateChanged(async user=>{
+  if(!user){ window.location.replace("login.html"); return; }
+  const doc = await db.collection("users").doc(user.uid).get();
+  if(!doc.exists){ window.location.replace("pay.html"); return; }
+  const data = doc.data();
+  if(data.expireDate && new Date() > data.expireDate.toDate()){ alert("Langganan Anda sudah habis!"); window.location.replace("pay.html"); return; }
+  if(data.Isadmin){ adminSidebar.style.display="block"; adminSidebar.addEventListener("click", ()=> window.location.href="adminlog.html"); }
+  document.body.style.display = "block";
+
+  const LOGOUT_TIME = 60 * 1000;
+  let logoutTimer;
+  function resetLogoutTimer(){ clearTimeout(logoutTimer); logoutTimer=setTimeout(()=>{ alert("Anda tidak aktif selama 1 menit, logout otomatis."); auth.signOut().then(()=> window.location.replace("login.html")); }, LOGOUT_TIME);}
+  ['mousemove','mousedown','keydown','scroll','touchstart'].forEach(evt=>{ window.addEventListener(evt, resetLogoutTimer); });
+  resetLogoutTimer();
+});
+
+document.getElementById("generateRange").addEventListener("click", generateRange);
+document.addEventListener("input", hitung);
+
+// 🔹 Tombol download PDF sekarang otomatis menyimpan data juga
+document.getElementById("downloadPdf").addEventListener("click", () => {
+  localStorage.setItem("journalData", document.getElementById("journal").innerHTML);
+  html2pdf().from(document.getElementById("journal")).save("Trading_Journal.pdf");
+});
+
+document.getElementById("renewSubscription").addEventListener("click",()=> window.location.href="pay.html");
+document.getElementById("logoutBtn").addEventListener("click", ()=> auth.signOut().then(()=>window.location.replace("login.html")));
+
+</script>
+</body>
+  </html>

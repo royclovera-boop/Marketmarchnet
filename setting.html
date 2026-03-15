@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Setting Akun Modern</title>
+<style>
+body {
+  margin:0;
+  font-family: Arial, sans-serif;
+  background:#121212;
+  color:#fff;
+  display:flex;
+  justify-content:center;
+  align-items:flex-start;
+  padding:50px 10px;
+}
+.setting-card{
+  background:#1f1f1f;
+  border-radius:12px;
+  padding:30px;
+  width:400px;
+  box-shadow:0 5px 15px rgba(0,0,0,0.3);
+}
+.setting-card h2{
+  text-align:center;
+  margin-bottom:20px;
+  color:#00ff88;
+}
+.setting-row{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:15px;
+  padding:10px;
+  background:#2b2b2b;
+  border-radius:8px;
+}
+.setting-row label{
+  flex:1;
+}
+.setting-row span{
+  flex:1;
+}
+.setting-row input{
+  flex:1;
+  padding:6px 10px;
+  border-radius:5px;
+  border:none;
+}
+button{
+  padding:8px 12px;
+  background:#00ff88;
+  color:#000;
+  font-weight:bold;
+  border:none;
+  border-radius:6px;
+  cursor:pointer;
+  margin-left:5px;
+}
+button:hover{
+  opacity:0.9;
+}
+#otp-section{
+  margin-top:20px;
+  display:none;
+  background:#2b2b2b;
+  padding:15px;
+  border-radius:8px;
+}
+#otp-section input{
+  width:100%;
+  margin-bottom:10px;
+  padding:8px;
+  border-radius:5px;
+  border:none;
+}
+
+/* ====== ABOUT POPUP ====== */
+#about-popup{
+  position:fixed;
+  top:0;
+  left:0;
+  width:100%;
+  height:100%;
+  background:rgba(0,0,0,0.8);
+  display:none;
+  justify-content:center;
+  align-items:center;
+}
+.about-box{
+  background:#1f1f1f;
+  width:90%;
+  max-width:400px;
+  padding:25px;
+  border-radius:12px;
+  text-align:left;
+  box-shadow:0 0 20px rgba(0,255,136,0.3);
+}
+.about-box h3{
+  color:#00ff88;
+  text-align:center;
+}
+.close-btn{
+  background:red;
+  color:white;
+  margin-top:15px;
+  width:100%;
+}
+</style>
+</head>
+<body>
+
+<div class="setting-card">
+  <h2>Setting Akun</h2>
+
+  <!-- Email User -->
+  <div class="setting-row">
+    <label>Email:</label>
+    <span id="user-email"></span>
+    <button onclick="ubahField('email')">Ubah</button>
+  </div>
+
+  <!-- Password User -->
+  <div class="setting-row">
+    <label>Password:</label>
+    <span id="user-pass">*****</span>
+    <button onclick="ubahField('password')">Ubah</button>
+  </div>
+
+  <!-- Button Tentang Aplikasi -->
+  <div class="setting-row">
+    <label>Tentang Aplikasi</label>
+    <button onclick="bukaAbout()">Lihat</button>
+  </div>
+
+  <!-- Input baru -->
+  <div class="setting-row" id="input-row" style="display:none;">
+    <input type="text" id="new-value" placeholder="">
+  </div>
+
+  <!-- Save Button -->
+  <div style="text-align:center; margin-top:10px;">
+    <button id="save-btn" onclick="kirimOtp()" style="display:none;">Save</button>
+  </div>
+
+  <!-- OTP Section -->
+  <div id="otp-section">
+    <label>Masukkan OTP:</label>
+    <input type="text" id="otp-input" placeholder="Kode OTP">
+    <button onclick="verifikasiOtp()">Verifikasi</button>
+  </div>
+
+</div>
+
+<!-- ABOUT POPUP -->
+<div id="about-popup">
+  <div class="about-box">
+    <h3> TENTANG MARKET MARCH</h3>
+    <p><b>📒 Jurnal Trading</b><br>
+    Catat entry, exit, profit/loss, pair, strategi, dan emosi trading untuk evaluasi performa.</p>
+
+    <p><b>🛒 Toko Trading</b><br>
+    Menyediakan template jurnal, indikator premium, ebook, dan tools trading.</p>
+
+    <p><b>📊 Backtest</b><br>
+    Uji strategi menggunakan data historis sebelum digunakan di akun real.</p>
+
+    <p><b>🏆 Rank Jurnal</b><br>
+    Leaderboard trader berdasarkan konsistensi dan winrate.</p>
+    
+        <p><b> ⚙️ Pembuat </b><br>
+     Market march dibuat pada tanggal 15 February 2025 berdasarkan kebutuhan trader dan hiburan semata pembuat byCLOVERA founder Roy Saputra dan email pusat bantuan cloveradeveloper@gmail.com atau royclovera@gmail.com </p>
+
+
+    <button class="close-btn" onclick="tutupAbout()">Tutup</button>
+  </div>
+</div>
+
+<!-- EmailJS -->
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+
+<script>
+emailjs.init("__EMAILJS_PUBLICKEY__");
+
+const firebaseConfig = {
+  apiKey: "__FIREBASE_APIKEY__",
+  authDomain: "__FIREBASE_AUTHDOMAIN__",
+  projectId: "__FIREBASE_PROJECTID__"
+};
+
+// Inisialisasi Firebase
+if(!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+
+let currentUserEmail = "";
+let currentUserUid = "";
+let otpSimpan = "";
+let fieldSimpan = "";
+let newValue = "";
+
+// Ambil user login
+auth.onAuthStateChanged(user=>{
+  if(user){
+    currentUserEmail = user.email;
+    currentUserUid = user.uid;
+    document.getElementById('user-email').innerText = currentUserEmail;
+  }else{
+    alert("Silakan login!");
+    window.location.href="login.html";
+  }
+});
+
+function ubahField(field){
+  fieldSimpan = field;
+  const inputRow = document.getElementById("input-row");
+  const newInput = document.getElementById("new-value");
+  newInput.value = "";
+  if(field==="email"){
+    newInput.type="email";
+    newInput.placeholder="Email baru";
+  }else{
+    newInput.type="password";
+    newInput.placeholder="Password baru";
+  }
+  inputRow.style.display="flex";
+  document.getElementById("save-btn").style.display="inline-block";
+}
+
+function generateOtp(){ return Math.floor(100000+Math.random()*900000).toString(); }
+
+async function kirimOtp(){
+  newValue = document.getElementById("new-value").value;
+  if(!newValue){ alert("Masukkan nilai baru!"); return; }
+
+  otpSimpan = generateOtp();
+  await db.collection("otpPending").doc(currentUserUid+"_"+fieldSimpan).set({
+    otp: otpSimpan,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+
+  let targetEmail = currentUserEmail;
+  if(fieldSimpan==="email") targetEmail = newValue;
+
+  emailjs.send("__EMAILJS_SERVICEID__","__EMAILJS_TEMPLATEID__",{
+    name: currentUserEmail,
+    email: targetEmail,
+    message: "Kode OTP kamu adalah: "+otpSimpan
+  }).then(()=>{
+    alert("OTP dikirim ✅");
+    document.getElementById("otp-section").style.display="block";
+  }).catch(err=>{
+    alert("Gagal kirim OTP ❌");
+    console.error(err);
+  });
+}
+
+async function verifikasiOtp(){
+  const userOtp = document.getElementById("otp-input").value;
+  if(!userOtp){ alert("Masukkan OTP!"); return; }
+
+  const otpDoc = await db.collection("otpPending").doc(currentUserUid+"_"+fieldSimpan).get();
+  if(!otpDoc.exists){ alert("OTP tidak ditemukan. Kirim ulang!"); return; }
+
+  const { otp, createdAt } = otpDoc.data();
+  if(new Date() - createdAt.toDate() > 5*60*1000){
+    alert("OTP kadaluarsa. Kirim ulang!");
+    await db.collection("otpPending").doc(currentUserUid+"_"+fieldSimpan).delete();
+    document.getElementById("otp-section").style.display="none";
+    return;
+  }
+
+  if(userOtp!==otp){ alert("OTP salah ❌"); return; }
+
+  try{
+    if(fieldSimpan==="password"){
+      await auth.currentUser.updatePassword(newValue);
+      alert("Password berhasil diubah ✅");
+    }else if(fieldSimpan==="email"){
+      await auth.currentUser.updateEmail(newValue);
+      await db.collection("users").doc(currentUserUid).update({email:newValue});
+      document.getElementById("user-email").innerText = newValue;
+      currentUserEmail = newValue;
+      alert("Email berhasil diubah ✅");
+    }
+
+    await db.collection("otpPending").doc(currentUserUid+"_"+fieldSimpan).delete();
+    document.getElementById("otp-section").style.display="none";
+    document.getElementById("input-row").style.display="none";
+    document.getElementById("save-btn").style.display="none";
+    document.getElementById("otp-input").value="";
+    document.getElementById("new-value").value="";
+  }catch(err){
+    alert("Gagal update: "+err.message);
+  }
+}
+
+/* ===== ABOUT FUNCTION ===== */
+function bukaAbout(){
+  document.getElementById("about-popup").style.display="flex";
+}
+function tutupAbout(){
+  document.getElementById("about-popup").style.display="none";
+  
+}
+</script>
+
+</body>
+  </html>

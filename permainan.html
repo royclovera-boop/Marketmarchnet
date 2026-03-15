@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎮 HALAMAN MENU PERMAINAN</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: Arial, sans-serif;
+        }
+
+        body {
+            background-color: #f5f5f5;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 1rem;
+        }
+
+        .menu-container {
+            background: white;
+            padding: 2rem;
+            border-radius: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 500px;
+            text-align: center;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 2rem;
+        }
+
+        .game-button {
+            display: block;
+            width: 100%;
+            padding: 1.5rem;
+            margin: 1rem 0;
+            border: none;
+            border-radius: 10px;
+            background-color: #4CAF50;
+            color: white;
+            font-size: 1.2rem;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        .game-button:hover {
+            background-color: #45a049;
+        }
+
+        .back-button {
+            background-color: #f44336;
+            margin-top: 2rem;
+        }
+
+        .back-button:hover {
+            background-color: #d32f2f;
+        }
+    </style>
+</head>
+<body>
+    <div class="menu-container">
+        <h1> MENU PERMAINAN</h1>
+
+        <!-- TOMBOL TRANSIT - BISA DIEDIT SESUKA KAMU -->
+        <button class="game-button" id="btn-game1">PUZZLE</button>
+        <button class="game-button" id="btn-game2">TETRIS</button>
+
+        <button class="game-button back-button" onclick="window.location.href='login.html'">KEMBALI KE LOGIN</button>
+    </div>
+
+    <script>
+        document.getElementById('btn-game1').addEventListener('click', () => {
+            window.location.href = 'game1.html'; 
+        });
+        document.getElementById('btn-game2').addEventListener('click', () => {
+    window.location.href = 'tetris.html';
+});
+        
+  </script>
+</body>
+</html>

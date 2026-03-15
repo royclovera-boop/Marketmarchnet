@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pasel Susun Gambar - Geser (4x4)</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: Arial, sans-serif;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+
+        h1 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .game-container {
+            position: relative;
+            border: 5px solid #333;
+            background-color: #000;
+            overflow: hidden;
+            width: fit-content;
+            height: fit-content;
+        }
+
+        /* Potongan gambar dasar yang timbul */
+        .tile {
+            position: absolute;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            border: 2px solid #fff;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            z-index: 10;
+        }
+
+        /* Potongan gambar normal - efek sedikit timbul */
+        .tile:not(.empty) {
+            transform: translateZ(5px);
+        }
+
+        /* Kotak kosong - 3D timbul dengan gaya gambar */
+        .tile.empty {
+            background-image: url('${CONFIG.IMAGE_PATH}') !important;
+            border: 3px solid #ffd700;
+            box-shadow: 
+                0 0 0 4px rgba(255, 215, 0, 0.3),
+                0 8px 16px rgba(0,0,0,0.4),
+                inset 0 0 20px rgba(255, 215, 0, 0.2);
+            z-index: 15;
+            transform: translateZ(10px) scale(1.02);
+        }
+
+        #status {
+            margin-top: 20px;
+            font-size: 1.2rem;
+            color: #333;
+        }
+
+        #reset-btn {
+            margin-top: 10px;
+            padding: 10px 20px;
+            font-size: 1rem;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        #reset-btn:hover {
+            background-color: #45a049;
+        }
+    </style>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-storage-compat.js"></script>
+</head>
+<body>
+    <h1>Pasel Susun Gambar (4x4)</h1>
+    <div class="game-container" id="game-container"></div>
+    <div id="status">Aktif mode desktop!</div>
+    <button id="reset-btn">Acak Ulang</button>
+
+    <script>
+        // === KONFIGURASI FIREBASE ===
+        const firebaseConfig = {
+  apiKey: "__FIREBASE_APIKEY__",
+  authDomain: "__FIREBASE_AUTHDOMAIN__",
+  projectId: "__FIREBASE_PROJECTID__"
+};
+
+// Inisialisasi Firebase
+if(!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+        // Konfigurasi game (4x4 = 16 kotak)
+        const CONFIG = {
+            IMAGE_PATH: 'imgs/puzzle2.png', // Ganti dengan path gambar Anda
+            GRID_SIZE: 4, // Ukuran grid (4x4)
+            TILE_SIZE: 120 // Ukuran setiap potongan gambar (dalam piksel)
+        };
+
+        let tiles = [];
+        let emptyTileIndex;
+        const gameContainer = document.getElementById('game-container');
+        const statusText = document.getElementById('status');
+        const resetBtn = document.getElementById('reset-btn');
+
+        // Inisialisasi game
+        function initGame() {
+            // Set ukuran kontainer game
+            gameContainer.style.width = `${CONFIG.GRID_SIZE * CONFIG.TILE_SIZE}px`;
+            gameContainer.style.height = `${CONFIG.GRID_SIZE * CONFIG.TILE_SIZE}px`;
+
+            // Buat potongan gambar
+            createTiles();
+            // Acak urutan potongan
+            shuffleTiles();
+            // Tampilkan potongan
+            renderTiles();
+        }
+
+        // Buat potongan gambar berdasarkan grid
+        function createTiles() {
+            tiles = [];
+            for (let i = 0; i < CONFIG.GRID_SIZE * CONFIG.GRID_SIZE; i++) {
+                const tile = document.createElement('div');
+                tile.classList.add('tile');
+                tile.style.width = `${CONFIG.TILE_SIZE}px`;
+                tile.style.height = `${CONFIG.TILE_SIZE}px`;
+                
+                // Hitung posisi x dan y pada gambar asli
+                const row = Math.floor(i / CONFIG.GRID_SIZE);
+                const col = i % CONFIG.GRID_SIZE;
+                tile.style.backgroundImage = `url('${CONFIG.IMAGE_PATH}')`;
+                tile.style.backgroundPosition = `-${col * CONFIG.TILE_SIZE}px -${row * CONFIG.TILE_SIZE}px`;
+                tile.style.backgroundSize = `${CONFIG.GRID_SIZE * CONFIG.TILE_SIZE}px ${CONFIG.GRID_SIZE * CONFIG.TILE_SIZE}px`;
+
+                // Simpan informasi posisi sebenarnya
+                tile.dataset.actualIndex = i;
+                // Posisi saat ini di grid
+                tile.dataset.currentIndex = i;
+
+                // Tambahkan event klik untuk geser
+                tile.addEventListener('click', moveTile);
+
+                tiles.push(tile);
+            }
+
+            // Atur satu kotak kosong saja (berbasis gambar dengan efek 3D)
+            emptyTileIndex = CONFIG.GRID_SIZE * CONFIG.GRID_SIZE - 1;
+            tiles[emptyTileIndex].classList.add('empty');
+            // Pastikan background position kotak kosong sesuai bagian gambar aslinya
+            const emptyRow = Math.floor(tiles[emptyTileIndex].dataset.actualIndex / CONFIG.GRID_SIZE);
+            const emptyCol = tiles[emptyTileIndex].dataset.actualIndex % CONFIG.GRID_SIZE;
+            tiles[emptyTileIndex].style.backgroundPosition = `-${emptyCol * CONFIG.TILE_SIZE}px -${emptyRow * CONFIG.TILE_SIZE}px`;
+        }
+
+        // Acak urutan potongan dengan algoritma Fisher-Yates yang benar
+        function shuffleTiles() {
+            let currentIndex = tiles.length;
+            let tempValue, randomIndex;
+
+            while (currentIndex !== 0) {
+                randomIndex = Math.floor(Math.random() * currentIndex);
+                currentIndex--;
+
+                // Tukar posisi saat ini
+                tempValue = tiles[currentIndex].dataset.currentIndex;
+                tiles[currentIndex].dataset.currentIndex = tiles[randomIndex].dataset.currentIndex;
+                tiles[randomIndex].dataset.currentIndex = tempValue;
+            }
+
+            // Pastikan hanya satu kotak kosong dengan gaya 3D
+            tiles.forEach((tile, idx) => {
+                if (idx === emptyTileIndex) {
+                    tile.classList.add('empty');
+                    // Set background position sesuai bagian gambar aslinya
+                    const row = Math.floor(tile.dataset.actualIndex / CONFIG.GRID_SIZE);
+                    const col = tile.dataset.actualIndex % CONFIG.GRID_SIZE;
+                    tile.style.backgroundPosition = `-${col * CONFIG.TILE_SIZE}px -${row * CONFIG.TILE_SIZE}px`;
+                } else {
+                    tile.classList.remove('empty');
+                    const row = Math.floor(tile.dataset.actualIndex / CONFIG.GRID_SIZE);
+                    const col = tile.dataset.actualIndex % CONFIG.GRID_SIZE;
+                    tile.style.backgroundImage = `url('${CONFIG.IMAGE_PATH}')`;
+                    tile.style.backgroundPosition = `-${col * CONFIG.TILE_SIZE}px -${row * CONFIG.TILE_SIZE}px`;
+                }
+            });
+
+            // Periksa kelayakan
+            if (!isSolvable()) {
+                // Tukar dua potongan gambar saja (bukan kosong)
+                let tileA, tileB;
+                for (let i = 0; i < tiles.length; i++) {
+                    if (!tiles[i].classList.contains('empty')) {
+                        tileA = i;
+                        break;
+                    }
+                }
+                for (let i = tileA + 1; i < tiles.length; i++) {
+                    if (!tiles[i].classList.contains('empty')) {
+                        tileB = i;
+                        break;
+                    }
+                }
+                const temp = tiles[tileA].dataset.currentIndex;
+                tiles[tileA].dataset.currentIndex = tiles[tileB].dataset.currentIndex;
+                tiles[tileB].dataset.currentIndex = temp;
+            }
+        }
+
+        // Periksa apakah urutan bisa diselesaikan
+        function isSolvable() {
+            let inversionCount = 0;
+            const tileValues = tiles.map(t => parseInt(t.dataset.currentIndex));
+            const emptyPos = parseInt(tiles[emptyTileIndex].dataset.currentIndex);
+
+            for (let i = 0; i < tileValues.length - 1; i++) {
+                for (let j = i + 1; j < tileValues.length; j++) {
+                    if (tileValues[i] > tileValues[j] && tileValues[j] !== emptyPos && tileValues[i] !== emptyPos) {
+                        inversionCount++;
+                    }
+                }
+            }
+
+            const emptyRowFromBottom = CONFIG.GRID_SIZE - Math.floor(emptyPos / CONFIG.GRID_SIZE);
+            if (CONFIG.GRID_SIZE % 2 !== 0) {
+                return inversionCount % 2 === 0;
+            } else {
+                return (inversionCount + emptyRowFromBottom) % 2 === 0;
+            }
+        }
+
+        // Tampilkan potongan di posisi yang benar
+        function renderTiles() {
+            gameContainer.innerHTML = '';
+            tiles.forEach(tile => {
+                const currentIndex = parseInt(tile.dataset.currentIndex);
+                const row = Math.floor(currentIndex / CONFIG.GRID_SIZE);
+                const col = currentIndex % CONFIG.GRID_SIZE;
+                
+                // Atur posisi potongan di grid
+                tile.style.left = `${col * CONFIG.TILE_SIZE}px`;
+                tile.style.top = `${row * CONFIG.TILE_SIZE}px`;
+                gameContainer.appendChild(tile);
+            });
+        }
+
+        // Geser potongan hanya jika berdekatan dengan kotak kosong
+        function moveTile(e) {
+            const clickedTile = e.target;
+            // Jangan bisa klik kotak kosong
+            if (clickedTile.classList.contains('empty')) return;
+
+            const clickedCurrentIndex = parseInt(clickedTile.dataset.currentIndex);
+            const emptyCurrentIndex = parseInt(tiles[emptyTileIndex].dataset.currentIndex);
+
+            // Posisi di grid
+            const clickedRow = Math.floor(clickedCurrentIndex / CONFIG.GRID_SIZE);
+            const clickedCol = clickedCurrentIndex % CONFIG.GRID_SIZE;
+            const emptyRow = Math.floor(emptyCurrentIndex / CONFIG.GRID_SIZE);
+            const emptyCol = emptyCurrentIndex % CONFIG.GRID_SIZE;
+
+            // Cek apakah hanya berdekatan satu langkah (atas/bawah/kiri/kanan)
+            const isAdjacent = 
+                (clickedRow === emptyRow && Math.abs(clickedCol - emptyCol) === 1) ||
+                (clickedCol === emptyCol && Math.abs(clickedRow - emptyRow) === 1);
+
+            if (isAdjacent) {
+                // Tukar posisi saat ini antara potongan yang diklik dan kotak kosong
+                const temp = clickedTile.dataset.currentIndex;
+                clickedTile.dataset.currentIndex = tiles[emptyTileIndex].dataset.currentIndex;
+                tiles[emptyTileIndex].dataset.currentIndex = temp;
+
+                // Tampilkan ulang posisi
+                renderTiles();
+
+                // Periksa apakah game selesai
+                checkWin();
+            }
+        }
+
+        // Periksa apakah semua potongan sudah di posisi benar
+        function checkWin() {
+            const isWin = tiles.every((tile) => {
+                return parseInt(tile.dataset.currentIndex) === parseInt(tile.dataset.actualIndex);
+            });
+            
+            if (isWin) {
+                statusText.textContent = 'Selamat! Anda berhasil menyusun gambar!';
+                // Hapus efek 3D pada kotak kosong agar gambar tampil penuh
+                tiles[emptyTileIndex].classList.remove('empty');
+                renderTiles();
+
+                // Contoh: Simpan hasil ke Firebase Firestore (bisa disesuaikan)
+                saveGameResultToFirebase();
+            } else {
+                statusText.textContent = 'Lanjutkan menyusun...';
+            }
+        }
+
+        // Contoh fungsi menyimpan hasil game ke Firebase
+        function saveGameResultToFirebase() {
+            auth.onAuthStateChanged(user => {
+                if (user) {
+                    db.collection('puzzle_game_results').add({
+                        userId: user.uid,
+                        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                        gridSize: CONFIG.GRID_SIZE,
+                        imagePath: CONFIG.IMAGE_PATH
+                    })
+                    .then(docRef => {
+                        console.log('Hasil game disimpan dengan ID:', docRef.id);
+                    })
+                    .catch(error => {
+                        console.error('Error menyimpan hasil game:', error);
+                    });
+                } else {
+                    console.log('Pengguna tidak login, hasil tidak disimpan');
+                }
+            });
+        }
+
+        // Reset game saat tombol diklik
+        resetBtn.addEventListener('click', () => {
+            statusText.textContent = 'Aktfikan mode desktop!';
+            shuffleTiles();
+            renderTiles();
+        });
+
+        // Jalankan game saat halaman dimuat
+        window.addEventListener('load', initGame);
+    </script>
+</body>
+</html>
